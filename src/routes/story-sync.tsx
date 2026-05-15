@@ -22,8 +22,12 @@ type Phase = "setup" | "round_setup" | "listening" | "instruction" | "collaborat
 type Slot = { participant_id: string; name: string };
 type Group = { name: string; participants: Slot[] };
 type Config = { groups: Group[]; totalRounds: number; startingLevel: 1 | 2 | 3; multiGroup: boolean };
-type Round = { roundNumber: number; level: number; storyId: string; instructionId: string; groupName: string; pct: number; scores: ScoreSet };
+type Round = { roundNumber: number; level: number; storyId: string; instructionId: string; groupName: string; pct: number; scores: ScoreSet; perParticipant: ParticipantScore[] };
 type ScoreSet = { detail: number; order: number; instruction: number; completeness: number; errors: number };
+type ParticipantScore = { participant_id: string; name: string; segmentIdx: number; correct: number; total: number; distractorsIncluded: number; pct: number };
+type FactMark = "correct" | "incorrect";
+type FactMarks = Record<number, Record<number, FactMark>>; // segmentIdx -> factIdx -> mark
+type InstructionCompliance = "full" | "partial" | "none";
 type Coaching = { pattern: string; ask: string; tip: string };
 
 const COLLAB_TIMES: Record<number, number> = { 1: 90, 2: 75, 3: 60, 4: 45 };
@@ -71,7 +75,8 @@ function StorySync() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [collabTime, setCollabTime] = useState(60);
   const [instructionHidden, setInstructionHidden] = useState(false);
-  const [scores, setScores] = useState<ScoreSet>({ detail: 0, order: 0, instruction: 0, completeness: 0, errors: 0 });
+  const [factMarks, setFactMarks] = useState<FactMarks>({});
+  const [instructionCompliance, setInstructionCompliance] = useState<InstructionCompliance>("full");
   const [results, setResults] = useState<Round[]>([]);
   const [coachingPrompts, setCoachingPrompts] = useState<Coaching[]>([]);
   const [restoreOffer, setRestoreOffer] = useState<any>(null);
