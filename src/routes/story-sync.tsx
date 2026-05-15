@@ -581,9 +581,23 @@ function StorySync() {
       <Shell title={`Round ${roundNum} summary · ${last.groupName}`}>
         <Card className="space-y-4 p-6">
           <div className="text-center">
-            <div className="text-xs uppercase text-muted-foreground">Score</div>
+            <div className="text-xs uppercase text-muted-foreground">Group score</div>
             <div className="text-4xl font-bold">{last.pct}%</div>
           </div>
+
+          {last.perParticipant?.length > 0 && (
+            <div>
+              <div className="mb-2 text-sm font-medium">Per participant</div>
+              <div className="space-y-1.5">
+                {last.perParticipant.map(pp => (
+                  <div key={pp.participant_id} className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                    <span><span className="font-mono text-xs text-muted-foreground">{pp.participant_id}</span> · {pp.name}</span>
+                    <span className="tabular-nums"><span className="text-muted-foreground">{pp.correct}/{pp.total}{pp.distractorsIncluded ? ` · ${pp.distractorsIncluded}⚠` : ""}</span> <span className="ml-2 font-semibold">{pp.pct}%</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {coaching && (
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
