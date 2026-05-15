@@ -9,6 +9,8 @@ import {
 } from "@tanstack/react-router";
 
 import appCss from "../styles.css?url";
+import { FacilitatorProvider } from "@/lib/facilitator-context";
+import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
   return (
@@ -113,7 +115,10 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <FacilitatorProvider>
+        <Outlet />
+        <Toaster richColors position="top-center" />
+      </FacilitatorProvider>
     </QueryClientProvider>
   );
 }
