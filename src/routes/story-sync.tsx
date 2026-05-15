@@ -22,8 +22,12 @@ type Phase = "setup" | "round_setup" | "listening" | "instruction" | "collaborat
 type Slot = { participant_id: string; name: string };
 type Group = { name: string; participants: Slot[] };
 type Config = { groups: Group[]; totalRounds: number; startingLevel: 1 | 2 | 3; multiGroup: boolean };
-type Round = { roundNumber: number; level: number; storyId: string; instructionId: string; groupName: string; pct: number; scores: ScoreSet };
+type Round = { roundNumber: number; level: number; storyId: string; instructionId: string; groupName: string; pct: number; scores: ScoreSet; perParticipant: ParticipantScore[] };
 type ScoreSet = { detail: number; order: number; instruction: number; completeness: number; errors: number };
+type ParticipantScore = { participant_id: string; name: string; segmentIdx: number; correct: number; total: number; distractorsIncluded: number; pct: number };
+type FactMark = "correct" | "incorrect";
+type FactMarks = Record<number, Record<number, FactMark>>; // segmentIdx -> factIdx -> mark
+type InstructionCompliance = "full" | "partial" | "none";
 type Coaching = { pattern: string; ask: string; tip: string };
 
 const COLLAB_TIMES: Record<number, number> = { 1: 90, 2: 75, 3: 60, 4: 45 };
@@ -71,7 +75,8 @@ function StorySync() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [collabTime, setCollabTime] = useState(60);
   const [instructionHidden, setInstructionHidden] = useState(false);
-  const [scores, setScores] = useState<ScoreSet>({ detail: 0, order: 0, instruction: 0, completeness: 0, errors: 0 });
+  const [factMarks, setFactMarks] = useState<FactMarks>({});
+  const [instructionCompliance, setInstructionCompliance] = useState<InstructionCompliance>("full");
   const [results, setResults] = useState<Round[]>([]);
   const [coachingPrompts, setCoachingPrompts] = useState<Coaching[]>([]);
   const [restoreOffer, setRestoreOffer] = useState<any>(null);
@@ -421,66 +426,138 @@ function StorySync() {
 
   // ===== SCORING =====
   if (phase === "scoring" && story) {
-    const total =
-      scores.detail * 0.30 +
-      scores.order * 0.25 +
-      scores.instruction * 0.20 +
-      scores.completeness * 0.10 -
-      Math.min(scores.errors * 5, 25);
-    const pct = Math.max(0, Math.min(100, Math.round(total)));
+    const setMark = (seg: number, fact: number, mark: FactMark) => {
+      setFactMarks(prev => {
+        const segMarks = { ...(prev[seg] ?? {}) };
+        if (segMarks[fact] === mark) delete segMarks[fact];
+        else segMarks[fact] = mark;
+        return { ...prev, [seg]: segMarks };
+      });
+    };
+    // Per-participant scoring. For real facts: correct = recalled. For distractors: correct = correctly ignored, incorrect = wrongly included.
+    const perParticipant: ParticipantScore[] = activeGroup.participants.map((p, segIdx) => {
+      const seg = story.segments[segIdx];
+      const facts = seg?.facts ?? [];
+      const realFacts = facts.filter(f => !f.is_distractor);
+      let correct = 0;
+      let distractorsIncluded = 0;
+      facts.forEach((f, j) => {
+        const mark = factMarks[segIdx]?.[j];
+        if (f.is_distractor) {
+          if (mark === "incorrect") distractorsIncluded += 1;
+        } else {
+          if (mark === "correct") correct += 1;
+        }
+      });
+      const total = realFacts.length;
+      const base = total ? (correct / total) * 100 : 0;
+      const penalty = Math.min(distractorsIncluded * 10, 30);
+      const pct = Math.max(0, Math.min(100, Math.round(base - penalty)));
+      return { participant_id: p.participant_id, name: p.name, segmentIdx: segIdx, correct, total, distractorsIncluded, pct };
+    });
+    const groupPct = perParticipant.length
+      ? Math.round(perParticipant.reduce((s, p) => s + p.pct, 0) / perParticipant.length)
+      : 0;
+    const totalDistractorsIncluded = perParticipant.reduce((s, p) => s + p.distractorsIncluded, 0);
+    const instructionScore = instructionCompliance === "full" ? 3 : instructionCompliance === "partial" ? 1.5 : 0;
+    // Marked? (every fact must have a mark before confirming)
+    const totalFacts = story.segments.reduce((s, seg) => s + seg.facts.length, 0);
+    const markedFacts = Object.values(factMarks).reduce((s, m) => s + Object.keys(m).length, 0);
+    const allMarked = markedFacts === totalFacts;
+
     return (
       <Shell title="Scoring">
-        <Card className="space-y-4 p-6">
-          <div>
-            <div className="mb-2 text-sm font-medium">Answer key</div>
-            <div className="space-y-2">
-              {story.segments.map((s, i) => (
-                <div key={i} className="rounded-md border p-3 text-sm">
-                  <div className="text-xs text-muted-foreground">Segment {i + 1}</div>
-                  <ul className="mt-1 space-y-1">
-                    {s.facts.map((f, j) => (
-                      <li key={j} className={f.is_distractor ? "text-amber-600" : ""}>
-                        {f.is_distractor ? "⚠ " : "• "}<span className="font-medium">{f.label}:</span> {f.value}
-                      </li>
-                    ))}
+        <Card className="space-y-5 p-6">
+          <div className="rounded-md border bg-muted/20 p-3 text-sm">
+            Tap each fact <span className="font-medium text-emerald-600">Got it</span> if the team recalled it, or <span className="font-medium text-rose-600">Missed</span> if not. Distractors (⚠) score the opposite — Got it = correctly ignored.
+          </div>
+
+          <div className="space-y-4">
+            {story.segments.map((s, i) => {
+              const p = activeGroup.participants[i];
+              const pp = perParticipant[i];
+              return (
+                <div key={i} className="rounded-lg border p-3">
+                  <div className="mb-2 flex items-baseline justify-between">
+                    <div>
+                      <div className="text-xs text-muted-foreground">Segment {i + 1} · heard by</div>
+                      <div className="font-medium">{p?.name} <span className="font-mono text-xs text-muted-foreground">{p?.participant_id}</span></div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-muted-foreground">Their score</div>
+                      <div className="text-xl font-bold tabular-nums">{pp?.pct ?? 0}%</div>
+                    </div>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {s.facts.map((f, j) => {
+                      const mark = factMarks[i]?.[j];
+                      return (
+                        <li key={j} className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm">
+                          <span className={f.is_distractor ? "text-amber-600" : ""}>
+                            {f.is_distractor ? "⚠ " : ""}<span className="font-medium">{f.label}:</span> {f.value}
+                          </span>
+                          <div className="flex shrink-0 gap-1">
+                            <button
+                              onClick={() => setMark(i, j, "correct")}
+                              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition ${mark === "correct" ? "border-emerald-600 bg-emerald-600 text-white" : "border-border hover:bg-emerald-50"}`}
+                            >✓ Got it</button>
+                            <button
+                              onClick={() => setMark(i, j, "incorrect")}
+                              className={`rounded-md border px-2.5 py-1 text-xs font-medium transition ${mark === "incorrect" ? "border-rose-600 bg-rose-600 text-white" : "border-border hover:bg-rose-50"}`}
+                            >✗ {f.is_distractor ? "Included" : "Missed"}</button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
+              );
+            })}
+          </div>
+
+          <div>
+            <Label className="mb-2 block text-sm font-medium">Did the team follow the recall instruction?</Label>
+            <div className="flex gap-2">
+              {(["full", "partial", "none"] as const).map(v => (
+                <Button key={v} size="sm" variant={instructionCompliance === v ? "default" : "outline"} onClick={() => setInstructionCompliance(v)}>
+                  {v === "full" ? "Yes" : v === "partial" ? "Partly" : "No"}
+                </Button>
               ))}
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <ScoreInput label="Detail accuracy (0–100)" value={scores.detail} onChange={v => setScores({ ...scores, detail: v })} max={100} />
-            <ScoreInput label="Order accuracy (0–100)" value={scores.order} onChange={v => setScores({ ...scores, order: v })} max={100} />
-            <ScoreInput label="Instruction compliance (0–3)" value={scores.instruction} onChange={v => setScores({ ...scores, instruction: v })} max={3} />
-            <ScoreInput label="Completeness (0–100)" value={scores.completeness} onChange={v => setScores({ ...scores, completeness: v })} max={100} />
-            <ScoreInput label="Error count" value={scores.errors} onChange={v => setScores({ ...scores, errors: v })} max={20} />
-          </div>
-
           <div className="rounded-lg bg-muted/50 p-3 text-center">
-            <div className="text-xs uppercase text-muted-foreground">Round score</div>
-            <div className="text-3xl font-bold">{pct}%</div>
+            <div className="text-xs uppercase text-muted-foreground">Group round score</div>
+            <div className="text-3xl font-bold">{groupPct}%</div>
+            <div className="mt-1 text-xs text-muted-foreground">{markedFacts}/{totalFacts} facts marked</div>
           </div>
 
-          <Button className="w-full" onClick={async () => {
-            const r: Round = { roundNumber: roundNum, level, storyId: story.id, instructionId: instruction!.id, groupName: activeGroup.name, pct, scores: { ...scores } };
+          <Button disabled={!allMarked} className="w-full" onClick={async () => {
+            const scoreSet: ScoreSet = {
+              detail: groupPct,
+              order: groupPct,
+              instruction: instructionScore,
+              completeness: totalFacts ? Math.round((markedFacts / totalFacts) * 100) : 0,
+              errors: totalDistractorsIncluded,
+            };
+            const r: Round = { roundNumber: roundNum, level, storyId: story.id, instructionId: instruction!.id, groupName: activeGroup.name, pct: groupPct, scores: scoreSet, perParticipant };
             const newResults = [...results, r];
             setResults(newResults);
             if (sessionId) {
               await supabase.from("rounds").insert({
                 session_id: sessionId, round_number: roundNum, difficulty: level,
-                data: { storyId: story.id, instructionId: instruction!.id, groupName: activeGroup.name } as any,
-                scores: { ...scores, total: pct } as any,
+                data: { storyId: story.id, instructionId: instruction!.id, groupName: activeGroup.name, perParticipant, factMarks } as any,
+                scores: { ...scoreSet, total: groupPct } as any,
               });
-              for (const p of activeGroup.participants) {
+              for (const pp of perParticipant) {
                 await supabase.from("participant_scores").insert({
-                  participant_id: p.participant_id, session_id: sessionId,
-                  round_number: roundNum, dimension: "round_total", score: pct,
+                  participant_id: pp.participant_id, session_id: sessionId,
+                  round_number: roundNum, dimension: "round_total", score: pp.pct,
                 });
               }
             }
             setPhase("summary");
-          }}>Confirm scores</Button>
+          }}>{allMarked ? "Confirm scores" : `Mark all facts (${markedFacts}/${totalFacts})`}</Button>
         </Card>
       </Shell>
     );
@@ -504,9 +581,23 @@ function StorySync() {
       <Shell title={`Round ${roundNum} summary · ${last.groupName}`}>
         <Card className="space-y-4 p-6">
           <div className="text-center">
-            <div className="text-xs uppercase text-muted-foreground">Score</div>
+            <div className="text-xs uppercase text-muted-foreground">Group score</div>
             <div className="text-4xl font-bold">{last.pct}%</div>
           </div>
+
+          {last.perParticipant?.length > 0 && (
+            <div>
+              <div className="mb-2 text-sm font-medium">Per participant</div>
+              <div className="space-y-1.5">
+                {last.perParticipant.map(pp => (
+                  <div key={pp.participant_id} className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                    <span><span className="font-mono text-xs text-muted-foreground">{pp.participant_id}</span> · {pp.name}</span>
+                    <span className="tabular-nums"><span className="text-muted-foreground">{pp.correct}/{pp.total}{pp.distractorsIncluded ? ` · ${pp.distractorsIncluded}⚠` : ""}</span> <span className="ml-2 font-semibold">{pp.pct}%</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {coaching && (
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
@@ -536,7 +627,8 @@ function StorySync() {
               setLevel(nextLevel);
               setStory(null);
               setInstruction(null);
-              setScores({ detail: 0, order: 0, instruction: 0, completeness: 0, errors: 0 });
+              setFactMarks({});
+              setInstructionCompliance("full");
               setListenIdx(0);
               setPhase("round_setup");
             }}>Next round</Button>
