@@ -9,8 +9,26 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TheGridRouteImport } from './routes/the-grid'
+import { Route as StorySyncRouteImport } from './routes/story-sync'
+import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TheGridRoute = TheGridRouteImport.update({
+  id: '/the-grid',
+  path: '/the-grid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StorySyncRoute = StorySyncRouteImport.update({
+  id: '/story-sync',
+  path: '/story-sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ParticipantsRoute = ParticipantsRouteImport.update({
+  id: '/participants',
+  path: '/participants',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -19,28 +37,61 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/participants': typeof ParticipantsRoute
+  '/story-sync': typeof StorySyncRoute
+  '/the-grid': typeof TheGridRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/participants': typeof ParticipantsRoute
+  '/story-sync': typeof StorySyncRoute
+  '/the-grid': typeof TheGridRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/participants': typeof ParticipantsRoute
+  '/story-sync': typeof StorySyncRoute
+  '/the-grid': typeof TheGridRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/participants' | '/story-sync' | '/the-grid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/participants' | '/story-sync' | '/the-grid'
+  id: '__root__' | '/' | '/participants' | '/story-sync' | '/the-grid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ParticipantsRoute: typeof ParticipantsRoute
+  StorySyncRoute: typeof StorySyncRoute
+  TheGridRoute: typeof TheGridRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/the-grid': {
+      id: '/the-grid'
+      path: '/the-grid'
+      fullPath: '/the-grid'
+      preLoaderRoute: typeof TheGridRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/story-sync': {
+      id: '/story-sync'
+      path: '/story-sync'
+      fullPath: '/story-sync'
+      preLoaderRoute: typeof StorySyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/participants': {
+      id: '/participants'
+      path: '/participants'
+      fullPath: '/participants'
+      preLoaderRoute: typeof ParticipantsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -53,6 +104,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ParticipantsRoute: ParticipantsRoute,
+  StorySyncRoute: StorySyncRoute,
+  TheGridRoute: TheGridRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
