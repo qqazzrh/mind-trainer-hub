@@ -647,7 +647,24 @@ function StorySync() {
     const byGroup = config.groups.map(g => {
       const rs = results.filter(r => r.groupName === g.name);
       const avg = rs.length ? Math.round(rs.reduce((s, r) => s + r.pct, 0) / rs.length) : 0;
-      return { name: g.name, rounds: rs, avg };
+      // Aggregate per-participant performance across all their rounds.
+      const ppMap = new Map<string, { participant_id: string; name: string; rounds: number; correct: number; total: number; distractorsIncluded: number; pctSum: number }>();
+      rs.forEach(r => {
+        r.perParticipant?.forEach(pp => {
+          const cur = ppMap.get(pp.participant_id) ?? { participant_id: pp.participant_id, name: pp.name, rounds: 0, correct: 0, total: 0, distractorsIncluded: 0, pctSum: 0 };
+          cur.rounds += 1;
+          cur.correct += pp.correct;
+          cur.total += pp.total;
+          cur.distractorsIncluded += pp.distractorsIncluded;
+          cur.pctSum += pp.pct;
+          ppMap.set(pp.participant_id, cur);
+        });
+      });
+      const participants = Array.from(ppMap.values()).map(p => ({
+        ...p,
+        avgPct: p.rounds ? Math.round(p.pctSum / p.rounds) : 0,
+      })).sort((a, b) => b.avgPct - a.avgPct);
+      return { name: g.name, rounds: rs, avg, participants };
     });
     return (
       <Shell title="Session results">
@@ -661,21 +678,70 @@ function StorySync() {
               {g.rounds.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No rounds played.</p>
               ) : (
-                <div className="overflow-x-auto rounded-lg border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50 text-left">
-                      <tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Level</th><th className="px-3 py-2">Score</th></tr>
-                    </thead>
-                    <tbody>
+                <div className="space-y-4">
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50 text-left">
+                        <tr><th className="px-3 py-2">Round</th><th className="px-3 py-2">Level</th><th className="px-3 py-2">Group score</th></tr>
+                      </thead>
+                      <tbody>
+                        {g.rounds.map(r => (
+                          <tr key={r.roundNumber} className="border-t">
+                            <td className="px-3 py-2">{r.roundNumber}</td>
+                            <td className="px-3 py-2">L{r.level}</td>
+                            <td className="px-3 py-2 font-medium">{r.pct}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {g.participants.length > 0 && (
+                    <div>
+                      <div className="mb-2 text-sm font-medium">Individual performance</div>
+                      <div className="overflow-x-auto rounded-lg border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50 text-left">
+                            <tr>
+                              <th className="px-3 py-2">Participant</th>
+                              <th className="px-3 py-2">Rounds</th>
+                              <th className="px-3 py-2">Facts recalled</th>
+                              <th className="px-3 py-2">Distractors included</th>
+                              <th className="px-3 py-2">Avg score</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.participants.map(p => (
+                              <tr key={p.participant_id} className="border-t">
+                                <td className="px-3 py-2"><span className="font-mono text-xs text-muted-foreground">{p.participant_id}</span> · {p.name}</td>
+                                <td className="px-3 py-2 tabular-nums">{p.rounds}</td>
+                                <td className="px-3 py-2 tabular-nums">{p.correct}/{p.total}</td>
+                                <td className="px-3 py-2 tabular-nums">{p.distractorsIncluded}</td>
+                                <td className="px-3 py-2 font-semibold tabular-nums">{p.avgPct}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  <details className="rounded-lg border">
+                    <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Per-round breakdown by participant</summary>
+                    <div className="space-y-3 p-3">
                       {g.rounds.map(r => (
-                        <tr key={r.roundNumber} className="border-t">
-                          <td className="px-3 py-2">{r.roundNumber}</td>
-                          <td className="px-3 py-2">L{r.level}</td>
-                          <td className="px-3 py-2 font-medium">{r.pct}%</td>
-                        </tr>
+                        <div key={r.roundNumber} className="rounded-md border p-2">
+                          <div className="mb-1 text-xs text-muted-foreground">Round {r.roundNumber} · L{r.level} · group {r.pct}%</div>
+                          <ul className="space-y-1">
+                            {r.perParticipant?.map(pp => (
+                              <li key={pp.participant_id} className="flex items-center justify-between text-sm">
+                                <span><span className="font-mono text-xs text-muted-foreground">{pp.participant_id}</span> · {pp.name}</span>
+                                <span className="tabular-nums"><span className="text-muted-foreground">{pp.correct}/{pp.total}{pp.distractorsIncluded ? ` · ${pp.distractorsIncluded}⚠` : ""}</span> <span className="ml-2 font-semibold">{pp.pct}%</span></span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                  </details>
                 </div>
               )}
             </div>
