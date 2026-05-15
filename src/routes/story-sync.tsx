@@ -31,7 +31,7 @@ type InstructionCompliance = "full" | "partial" | "none";
 type Coaching = { pattern: string; ask: string; tip: string };
 
 const COLLAB_TIMES: Record<number, number> = { 1: 90, 2: 75, 3: 60, 4: 45 };
-const RESTORE_KEY = "brain-gym:story-sync:active";
+const RESTORE_KEY_BASE = "brain-gym:story-sync:active";
 
 const defaultConfig = (): Config => ({
   groups: [{ name: "Group A", participants: [] }],
