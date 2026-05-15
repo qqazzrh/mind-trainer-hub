@@ -9,9 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TheGridRouteImport } from './routes/the-grid'
 import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TheGridRoute = TheGridRouteImport.update({
+  id: '/the-grid',
+  path: '/the-grid',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ParticipantsRoute = ParticipantsRouteImport.update({
   id: '/participants',
   path: '/participants',
@@ -26,31 +32,42 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/participants': typeof ParticipantsRoute
+  '/the-grid': typeof TheGridRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/participants': typeof ParticipantsRoute
+  '/the-grid': typeof TheGridRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/participants': typeof ParticipantsRoute
+  '/the-grid': typeof TheGridRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/participants'
+  fullPaths: '/' | '/participants' | '/the-grid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/participants'
-  id: '__root__' | '/' | '/participants'
+  to: '/' | '/participants' | '/the-grid'
+  id: '__root__' | '/' | '/participants' | '/the-grid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ParticipantsRoute: typeof ParticipantsRoute
+  TheGridRoute: typeof TheGridRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/the-grid': {
+      id: '/the-grid'
+      path: '/the-grid'
+      fullPath: '/the-grid'
+      preLoaderRoute: typeof TheGridRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/participants': {
       id: '/participants'
       path: '/participants'
@@ -71,6 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ParticipantsRoute: ParticipantsRoute,
+  TheGridRoute: TheGridRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
