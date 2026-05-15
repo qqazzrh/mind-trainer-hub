@@ -14,7 +14,228 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      coaching_prompts: {
+        Row: {
+          ask: string
+          created_at: string
+          id: string
+          pattern: string
+          tip: string
+        }
+        Insert: {
+          ask: string
+          created_at?: string
+          id?: string
+          pattern: string
+          tip: string
+        }
+        Update: {
+          ask?: string
+          created_at?: string
+          id?: string
+          pattern?: string
+          tip?: string
+        }
+        Relationships: []
+      }
+      facilitators: {
+        Row: {
+          created_at: string
+          facilitator_id: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          facilitator_id: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          facilitator_id?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      participant_scores: {
+        Row: {
+          dimension: string | null
+          id: string
+          participant_id: string
+          recorded_at: string
+          round_number: number | null
+          score: number | null
+          session_id: string | null
+        }
+        Insert: {
+          dimension?: string | null
+          id?: string
+          participant_id: string
+          recorded_at?: string
+          round_number?: number | null
+          score?: number | null
+          session_id?: string | null
+        }
+        Update: {
+          dimension?: string | null
+          id?: string
+          participant_id?: string
+          recorded_at?: string
+          round_number?: number | null
+          score?: number | null
+          session_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "participant_scores_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      participants: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          participant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          participant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          participant_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      rounds: {
+        Row: {
+          created_at: string
+          data: Json
+          difficulty: number
+          id: string
+          round_number: number
+          scores: Json
+          session_id: string
+        }
+        Insert: {
+          created_at?: string
+          data?: Json
+          difficulty: number
+          id?: string
+          round_number: number
+          scores?: Json
+          session_id: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          difficulty?: number
+          id?: string
+          round_number?: number
+          scores?: Json
+          session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rounds_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sessions: {
+        Row: {
+          config: Json
+          created_at: string
+          ended_at: string | null
+          facilitator_id: string | null
+          game_type: string
+          id: string
+          started_at: string
+          state: Json
+          status: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          ended_at?: string | null
+          facilitator_id?: string | null
+          game_type: string
+          id?: string
+          started_at?: string
+          state?: Json
+          status?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          ended_at?: string | null
+          facilitator_id?: string | null
+          game_type?: string
+          id?: string
+          started_at?: string
+          state?: Json
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sessions_facilitator_id_fkey"
+            columns: ["facilitator_id"]
+            isOneToOne: false
+            referencedRelation: "facilitators"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stories: {
+        Row: {
+          answer_keys: Json
+          created_at: string
+          difficulty_level: number
+          full_text: string
+          id: string
+          segments: Json
+          title: string | null
+        }
+        Insert: {
+          answer_keys?: Json
+          created_at?: string
+          difficulty_level: number
+          full_text: string
+          id?: string
+          segments: Json
+          title?: string | null
+        }
+        Update: {
+          answer_keys?: Json
+          created_at?: string
+          difficulty_level?: number
+          full_text?: string
+          id?: string
+          segments?: Json
+          title?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
