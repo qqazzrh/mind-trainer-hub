@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TheGridRouteImport } from './routes/the-grid'
+import { Route as StorySyncRouteImport } from './routes/story-sync'
 import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as IndexRouteImport } from './routes/index'
 
 const TheGridRoute = TheGridRouteImport.update({
   id: '/the-grid',
   path: '/the-grid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StorySyncRoute = StorySyncRouteImport.update({
+  id: '/story-sync',
+  path: '/story-sync',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ParticipantsRoute = ParticipantsRouteImport.update({
@@ -32,30 +38,34 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/participants': typeof ParticipantsRoute
+  '/story-sync': typeof StorySyncRoute
   '/the-grid': typeof TheGridRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/participants': typeof ParticipantsRoute
+  '/story-sync': typeof StorySyncRoute
   '/the-grid': typeof TheGridRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/participants': typeof ParticipantsRoute
+  '/story-sync': typeof StorySyncRoute
   '/the-grid': typeof TheGridRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/participants' | '/the-grid'
+  fullPaths: '/' | '/participants' | '/story-sync' | '/the-grid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/participants' | '/the-grid'
-  id: '__root__' | '/' | '/participants' | '/the-grid'
+  to: '/' | '/participants' | '/story-sync' | '/the-grid'
+  id: '__root__' | '/' | '/participants' | '/story-sync' | '/the-grid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ParticipantsRoute: typeof ParticipantsRoute
+  StorySyncRoute: typeof StorySyncRoute
   TheGridRoute: typeof TheGridRoute
 }
 
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/the-grid'
       fullPath: '/the-grid'
       preLoaderRoute: typeof TheGridRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/story-sync': {
+      id: '/story-sync'
+      path: '/story-sync'
+      fullPath: '/story-sync'
+      preLoaderRoute: typeof StorySyncRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/participants': {
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ParticipantsRoute: ParticipantsRoute,
+  StorySyncRoute: StorySyncRoute,
   TheGridRoute: TheGridRoute,
 }
 export const routeTree = rootRouteImport
