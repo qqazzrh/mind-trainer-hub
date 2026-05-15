@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TheGridRouteImport } from './routes/the-grid'
 import { Route as StorySyncRouteImport } from './routes/story-sync'
 import { Route as ParticipantsRouteImport } from './routes/participants'
+import { Route as LookupRouteImport } from './routes/lookup'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -30,6 +31,11 @@ const ParticipantsRoute = ParticipantsRouteImport.update({
   path: '/participants',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LookupRoute = LookupRouteImport.update({
+  id: '/lookup',
+  path: '/lookup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HistoryRoute = HistoryRouteImport.update({
   id: '/history',
   path: '/history',
@@ -44,6 +50,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
+  '/lookup': typeof LookupRoute
   '/participants': typeof ParticipantsRoute
   '/story-sync': typeof StorySyncRoute
   '/the-grid': typeof TheGridRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
+  '/lookup': typeof LookupRoute
   '/participants': typeof ParticipantsRoute
   '/story-sync': typeof StorySyncRoute
   '/the-grid': typeof TheGridRoute
@@ -59,19 +67,33 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/history': typeof HistoryRoute
+  '/lookup': typeof LookupRoute
   '/participants': typeof ParticipantsRoute
   '/story-sync': typeof StorySyncRoute
   '/the-grid': typeof TheGridRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/history' | '/participants' | '/story-sync' | '/the-grid'
+  fullPaths:
+    | '/'
+    | '/history'
+    | '/lookup'
+    | '/participants'
+    | '/story-sync'
+    | '/the-grid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/history' | '/participants' | '/story-sync' | '/the-grid'
+  to:
+    | '/'
+    | '/history'
+    | '/lookup'
+    | '/participants'
+    | '/story-sync'
+    | '/the-grid'
   id:
     | '__root__'
     | '/'
     | '/history'
+    | '/lookup'
     | '/participants'
     | '/story-sync'
     | '/the-grid'
@@ -80,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   HistoryRoute: typeof HistoryRoute
+  LookupRoute: typeof LookupRoute
   ParticipantsRoute: typeof ParticipantsRoute
   StorySyncRoute: typeof StorySyncRoute
   TheGridRoute: typeof TheGridRoute
@@ -108,6 +131,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ParticipantsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/lookup': {
+      id: '/lookup'
+      path: '/lookup'
+      fullPath: '/lookup'
+      preLoaderRoute: typeof LookupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/history': {
       id: '/history'
       path: '/history'
@@ -128,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   HistoryRoute: HistoryRoute,
+  LookupRoute: LookupRoute,
   ParticipantsRoute: ParticipantsRoute,
   StorySyncRoute: StorySyncRoute,
   TheGridRoute: TheGridRoute,
