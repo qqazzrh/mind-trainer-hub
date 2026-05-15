@@ -613,7 +613,8 @@ function StorySync() {
               setLevel(nextLevel);
               setStory(null);
               setInstruction(null);
-              setScores({ detail: 0, order: 0, instruction: 0, completeness: 0, errors: 0 });
+              setFactMarks({});
+              setInstructionCompliance("full");
               setListenIdx(0);
               setPhase("round_setup");
             }}>Next round</Button>
