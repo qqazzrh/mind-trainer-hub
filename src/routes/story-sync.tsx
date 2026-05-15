@@ -83,6 +83,10 @@ function StorySync() {
 
   useEffect(() => { if (!facilitator) navigate({ to: "/" }); }, [facilitator, navigate]);
 
+  // Scope restore to the active facilitator so multiple facilitators on the
+  // same device each have their own independent in-progress session.
+  const RESTORE_KEY = facilitator ? `${RESTORE_KEY_BASE}:${facilitator.facilitator_id}` : RESTORE_KEY_BASE;
+
   // Load coaching prompts once
   useEffect(() => {
     supabase.from("coaching_prompts").select("pattern, ask, tip").then(({ data }) => setCoachingPrompts(data ?? []));
@@ -99,7 +103,7 @@ function StorySync() {
         }
       }
     } catch {}
-  }, []);
+  }, [RESTORE_KEY]);
 
   // Persist active session
   useEffect(() => {
