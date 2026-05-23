@@ -135,6 +135,18 @@ function TheGrid() {
   const [tips, setTips] = useState<{ team: string; text: string }[]>([]);
   const [endModal, setEndModal] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [existingParticipants, setExistingParticipants] = useState<ExistingParticipant[]>([]);
+
+  // Load existing participants from DB
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("participants")
+        .select("id, participant_id, name")
+        .order("name", { ascending: true });
+      if (data) setExistingParticipants(data as ExistingParticipant[]);
+    })();
+  }, []);
 
   // Calc rounds
   const roundMinutes = useMemo(() => {
