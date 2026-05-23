@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useFacilitator } from "@/lib/facilitator-context";
@@ -468,8 +468,7 @@ function TheGrid() {
       newRound = round + 1;
     }
     setRound(newRound);
-    startRound(teams, difficulty, isPractice ? false : false);
-    // ^ after first call we always pass practice=false; difficulty is already updated state
+    startRound(teams, difficulty, false);
   };
 
   const confirmEndSession = () => setEndModal(true);
