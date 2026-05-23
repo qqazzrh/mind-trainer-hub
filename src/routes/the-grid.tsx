@@ -10,8 +10,9 @@ export const Route = createFileRoute("/the-grid")({
 });
 
 // ─────────── Types ───────────
-type Member = { name: string };
+type Member = { name: string; participantId?: string };
 type Team = { name: string; members: Member[]; count: number };
+type ExistingParticipant = { id: string; participant_id: string; name: string };
 type QueueItem = { teamIdx: number; memberIdx: number; quadrants: number[] };
 type QueueEntry = { memberIdx: number; pair: QueueItem[] };
 type MemberScore = {
