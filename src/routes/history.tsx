@@ -31,14 +31,14 @@ type RoundRow = {
 };
 
 function HistoryPage() {
-  const { facilitator } = useFacilitator();
+  const { facilitator, hydrated } = useFacilitator();
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
   const [rounds, setRounds] = useState<RoundRow[]>([]);
 
-  useEffect(() => { if (!facilitator) navigate({ to: "/" }); }, [facilitator, navigate]);
+  useEffect(() => { if (hydrated && !facilitator) navigate({ to: "/" }); }, [facilitator, hydrated, navigate]);
 
   useEffect(() => {
     (async () => {

@@ -55,7 +55,7 @@ function pickCoaching(prompts: Coaching[], cur: Round, prev: Round | undefined):
 }
 
 function StorySync() {
-  const { facilitator } = useFacilitator();
+  const { facilitator, hydrated } = useFacilitator();
   const navigate = useNavigate();
   const tts = useServerFn(synthesizeSpeech);
   const [phase, setPhase] = useState<Phase>("setup");
@@ -81,7 +81,7 @@ function StorySync() {
   const [coachingPrompts, setCoachingPrompts] = useState<Coaching[]>([]);
   const [restoreOffer, setRestoreOffer] = useState<any>(null);
 
-  useEffect(() => { if (!facilitator) navigate({ to: "/" }); }, [facilitator, navigate]);
+  useEffect(() => { if (hydrated && !facilitator) navigate({ to: "/" }); }, [facilitator, hydrated, navigate]);
 
   // Scope restore to the active facilitator so multiple facilitators on the
   // same device each have their own independent in-progress session.

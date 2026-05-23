@@ -16,14 +16,14 @@ type Participant = { participant_id: string; name: string };
 type ScoreRow = { session_id: string | null; round_number: number | null; dimension: string | null; score: number | null; recorded_at: string };
 
 function LookupPage() {
-  const { facilitator } = useFacilitator();
+  const { facilitator, hydrated } = useFacilitator();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Participant[]>([]);
   const [selected, setSelected] = useState<Participant | null>(null);
   const [scores, setScores] = useState<ScoreRow[]>([]);
 
-  useEffect(() => { if (!facilitator) navigate({ to: "/" }); }, [facilitator, navigate]);
+  useEffect(() => { if (hydrated && !facilitator) navigate({ to: "/" }); }, [facilitator, hydrated, navigate]);
 
   useEffect(() => {
     const t = setTimeout(async () => {
