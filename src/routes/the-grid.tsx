@@ -1,746 +1,1027 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Play, RefreshCw, Eye, EyeOff, Check } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { useFacilitator } from "@/lib/facilitator-context";
-import {
-  generateGrid,
-  LEVEL_SPECS,
-  recommendLevel,
-  sectionLayout,
-  totalCells,
-  type GridLevel,
-  type Section,
-} from "@/lib/grid-utils";
-import { cues } from "@/lib/audio-cues";
 
 export const Route = createFileRoute("/the-grid")({
   component: TheGrid,
   head: () => ({ meta: [{ title: "The Grid — Brain Gym" }] }),
 });
 
-type Phase =
+// ─────────── Types ───────────
+type Member = { name: string };
+type Team = { name: string; members: Member[]; count: number };
+type QueueItem = { teamIdx: number; memberIdx: number; quadrants: number[] };
+type QueueEntry = { memberIdx: number; pair: QueueItem[] };
+type MemberScore = {
+  name: string;
+  quadrants: number[];
+  correct: number;
+  wrong: number;
+  missed: number;
+  total: number;
+  filled: number;
+  pct: number;
+};
+type RoundScore = {
+  totalCorrect: number;
+  totalWrong: number;
+  totalMissed: number;
+  pct: number;
+  memberScores: MemberScore[];
+};
+type Screen =
   | "setup"
-  | "round_setup"
+  | "queue"
   | "viewing"
+  | "qreveal"
   | "drawing"
-  | "reveal"
   | "scoring"
-  | "round_summary"
-  | "results";
+  | "results"
+  | "final";
 
-type Config = {
-  team1Name: string;
-  team2Name: string;
-  playersPerTeam: number;
-  team1Players: string[];
-  team2Players: string[];
-  totalRounds: number;
-  startingLevel: GridLevel;
+const QABBR = ["TL", "TR", "BL", "BR"];
+
+const TIPS = {
+  low_accuracy: [
+    "Try chunking: break your quadrant into a 2×2 block and memorise one block at a time rather than scanning every cell.",
+    "Count the filled cells first — knowing there are 'about 8 black boxes' gives your brain an anchor before you try to place them.",
+    "Focus on the edges of your quadrant first. Edge patterns are easier to anchor than the interior.",
+  ],
+  low_order: [
+    "Before drawing, agree on who fills in which quadrant first — don't all draw at once or you'll talk over each other.",
+    "One person should call out their quadrant aloud while the others listen before anyone draws.",
+    "Use a simple left-to-right, top-to-bottom scan order when memorising.",
+  ],
+  missed_boxes: [
+    "If you're not sure about a box, leave it blank — a wrong shaded box costs more than a missed one.",
+    "Double-check the borders of your section. Boundary cells are the most commonly missed.",
+    "Only shade a box if at least one person is certain. Guessing hurts your score.",
+  ],
+  good_performance: [
+    "Great round! Try recalling the pattern in reverse — bottom to top — next time to stress-test your memory.",
+    "You're ready for harder grids. Each member silently memorises before the group shares.",
+    "Strong performance. Reduce your drawing time next round — speed adds cognitive pressure.",
+  ],
 };
+const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 
-type RoundResult = {
-  roundNumber: number;
-  level: GridLevel;
-  team1Score: number;
-  team2Score: number;
-  maxScore: number;
-};
+// ─────────── Helpers ───────────
+function generateGrid(n: number): number[][] {
+  const g: number[][] = [];
+  for (let r = 0; r < n; r++) {
+    g[r] = [];
+    for (let c = 0; c < n; c++) g[r][c] = Math.random() < 0.42 ? 1 : 0;
+  }
+  return g;
+}
+function getQuads(count: number, mi: number): number[] {
+  if (count === 1) return [0, 1, 2, 3];
+  if (count === 2) return mi === 0 ? [0, 1] : [2, 3];
+  if (count === 3) return mi === 0 ? [0] : mi === 1 ? [1, 2] : [3];
+  return [mi];
+}
 
-const COLOR_FILLS = ["bg-transparent", "bg-slate-900", "bg-rose-500", "bg-amber-400"];
-
+// ─────────── Component ───────────
 function TheGrid() {
   const { facilitator } = useFacilitator();
   const navigate = useNavigate();
-  const [phase, setPhase] = useState<Phase>("setup");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [config, setConfig] = useState<Config>({
-    team1Name: "Team 1",
-    team2Name: "Team 2",
-    playersPerTeam: 3,
-    team1Players: ["Player A", "Player B", "Player C", "Player D"],
-    team2Players: ["Player A", "Player B", "Player C", "Player D"],
-    totalRounds: 4,
-    startingLevel: 1,
-  });
-  const [roundNum, setRoundNum] = useState(1);
-  const [currentLevel, setCurrentLevel] = useState<GridLevel>(1);
-  const [viewingTimeOverride, setViewingTimeOverride] = useState<number | null>(null);
-  const [drawingTimerEnabled, setDrawingTimerEnabled] = useState(false);
-  const [drawingTimerDuration, setDrawingTimerDuration] = useState(120);
-  const [grid, setGrid] = useState<Section[] | null>(null);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [drawTimeLeft, setDrawTimeLeft] = useState<number | null>(null);
-  const [team1Score, setTeam1Score] = useState("");
-  const [team2Score, setTeam2Score] = useState("");
-  const [results, setResults] = useState<RoundResult[]>([]);
-  const [team1Recommend, setTeam1Recommend] = useState<GridLevel>(1);
-  const [team2Recommend, setTeam2Recommend] = useState<GridLevel>(1);
-  const tickRef = useRef<{ played: Set<number> }>({ played: new Set() });
-
   useEffect(() => {
     if (!facilitator) navigate({ to: "/" });
   }, [facilitator, navigate]);
 
-  // Viewing timer
+  // setup form
+  const [team1Name, setTeam1Name] = useState("Team Alpha");
+  const [team2Name, setTeam2Name] = useState("Team Beta");
+  const [count1, setCount1] = useState(2);
+  const [count2, setCount2] = useState(2);
+  const [members1, setMembers1] = useState<string[]>(["Member 1", "Member 2", "Member 3", "Member 4"]);
+  const [members2, setMembers2] = useState<string[]>(["Member 1", "Member 2", "Member 3", "Member 4"]);
+  const [gridSizeCfg, setGridSizeCfg] = useState(6);
+  const [viewTimeCfg, setViewTimeCfg] = useState(8);
+  const [drawTimeCfg, setDrawTimeCfg] = useState(120);
+  const [sessionDur, setSessionDur] = useState(30);
+
+  // game state
+  const [screen, setScreen] = useState<Screen>("setup");
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [gridSize, setGridSize] = useState(6);
+  const [viewTime, setViewTime] = useState(8);
+  const [drawTime, setDrawTime] = useState(120);
+  const [maxRounds, setMaxRounds] = useState(4);
+  const [round, setRound] = useState(0);
+  const [isPractice, setIsPractice] = useState(true);
+  const [difficulty, setDifficulty] = useState(1);
+  const [grids, setGrids] = useState<number[][][]>([]);
+  const [gridCount, setGridCount] = useState(1);
+  const [currentGridIdx, setCurrentGridIdx] = useState(0);
+  const [recallGridIdx, setRecallGridIdx] = useState(0);
+  const [viewQueue, setViewQueue] = useState<QueueEntry[]>([]);
+  const [queuePos, setQueuePos] = useState(0);
+  const [revealPos, setRevealPos] = useState(0);
+  const [showCover, setShowCover] = useState(false);
+  const [coverName, setCoverName] = useState("");
+  const [coverInstruction, setCoverInstruction] = useState("");
+  const coverCbRef = useRef<(() => void) | null>(null);
+  const [viewTimerLeft, setViewTimerLeft] = useState(0);
+  const [drawTimerLeft, setDrawTimerLeft] = useState(0);
+  const [scoringTeam, setScoringTeam] = useState(0);
+  const [scoringInputs, setScoringInputs] = useState<number[][][]>([]);
+  const [roundScores, setRoundScores] = useState<RoundScore[]>([]);
+  const [sessionScores, setSessionScores] = useState<number[]>([0, 0]);
+  const [diffChange, setDiffChange] = useState<"up" | "down" | "same">("same");
+  const [tips, setTips] = useState<{ team: string; text: string }[]>([]);
+  const [endModal, setEndModal] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Calc rounds
+  const roundMinutes = useMemo(() => {
+    const viewSlots = count1 + count2;
+    const handoff = 18;
+    const scoring = 2 * 90;
+    return (viewSlots * (viewTimeCfg + handoff) + drawTimeCfg + scoring) / 60;
+  }, [count1, count2, viewTimeCfg, drawTimeCfg]);
+  const estRounds = Math.max(1, Math.floor(sessionDur / roundMinutes));
+
+  // ─────────── Viewing timer ───────────
   useEffect(() => {
-    if (phase !== "viewing") return;
-    if (timeLeft <= 0) {
-      cues.end();
-      setPhase("drawing");
-      if (drawingTimerEnabled) {
-        setDrawTimeLeft(drawingTimerDuration);
+    if (screen !== "viewing") return;
+    if (showCover) return;
+    const id = setInterval(() => {
+      setViewTimerLeft((v) => {
+        if (v <= 1) {
+          // grid done
+          if (gridCount > 1 && currentGridIdx < gridCount - 1) {
+            setCurrentGridIdx((i) => i + 1);
+            return viewTime;
+          }
+          // advance to reveal
+          clearInterval(id);
+          setTimeout(() => setScreen("qreveal"), 0);
+          return 0;
+        }
+        return v - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [screen, showCover, gridCount, currentGridIdx, viewTime]);
+
+  // ─────────── Drawing timer ───────────
+  useEffect(() => {
+    if (screen !== "drawing") return;
+    if (drawTimerLeft <= 0) {
+      setScreen("scoring");
+      setupScoring();
+      return;
+    }
+    const id = setTimeout(() => setDrawTimerLeft((v) => v - 1), 1000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, drawTimerLeft]);
+
+  // ─────────── Setup actions ───────────
+  const updateMember = (team: 1 | 2, idx: number, val: string) => {
+    const arr = team === 1 ? [...members1] : [...members2];
+    arr[idx] = val;
+    team === 1 ? setMembers1(arr) : setMembers2(arr);
+  };
+
+  const startGame = async () => {
+    const t1: Team = {
+      name: team1Name || "Team 1",
+      count: count1,
+      members: Array.from({ length: count1 }, (_, i) => ({ name: members1[i] || `Member ${i + 1}` })),
+    };
+    const t2: Team = {
+      name: team2Name || "Team 2",
+      count: count2,
+      members: Array.from({ length: count2 }, (_, i) => ({ name: members2[i] || `Member ${i + 1}` })),
+    };
+    setTeams([t1, t2]);
+    setMaxRounds(estRounds);
+    setSessionScores([0, 0]);
+    setDifficulty(1);
+    setIsPractice(true);
+    setRound(0);
+
+    // Persist session
+    try {
+      const { data, error } = await supabase
+        .from("sessions")
+        .insert({
+          game_type: "the_grid",
+          facilitator_id: facilitator?.id ?? null,
+          config: {
+            teams: [t1, t2],
+            gridSize: gridSizeCfg,
+            viewTime: viewTimeCfg,
+            drawTime: drawTimeCfg,
+            sessionDuration: sessionDur,
+            maxRounds: estRounds,
+          },
+          status: "in_progress",
+        })
+        .select("id")
+        .single();
+      if (!error && data) setSessionId(data.id);
+    } catch {}
+
+    startRound([t1, t2], 1, true);
+  };
+
+  const startRound = (teamList: Team[], diff: number, practice: boolean) => {
+    let n = gridSizeCfg;
+    let vt = viewTimeCfg;
+    let gc = 1;
+    if (practice) {
+      n = 4;
+      vt = 10;
+      gc = 1;
+    } else {
+      const cfgs = [
+        { size: 6, viewTime: 10 },
+        { size: 8, viewTime: 8 },
+        { size: 8, viewTime: 6 },
+        { size: 10, viewTime: 5 },
+      ];
+      const cfg = cfgs[Math.min(3, diff - 1)];
+      n = cfg.size;
+      vt = cfg.viewTime;
+      gc = diff <= 2 ? 1 : diff === 3 ? 2 : 3;
+    }
+    setGridSize(n);
+    setViewTime(vt);
+    setGridCount(gc);
+    const newGrids: number[][][] = [];
+    for (let g = 0; g < gc; g++) newGrids.push(generateGrid(n));
+    setGrids(newGrids);
+    setRecallGridIdx(gc > 1 ? Math.floor(Math.random() * gc) : 0);
+
+    // Build queue
+    const max = Math.max(teamList[0].count, teamList[1].count);
+    const q: QueueEntry[] = [];
+    for (let mi = 0; mi < max; mi++) {
+      const pair: QueueItem[] = [];
+      for (let ti = 0; ti < 2; ti++) {
+        if (mi < teamList[ti].count) {
+          pair.push({ teamIdx: ti, memberIdx: mi, quadrants: getQuads(teamList[ti].count, mi) });
+        }
       }
+      if (pair.length) q.push({ memberIdx: mi, pair });
+    }
+    setViewQueue(q);
+    setQueuePos(0);
+    setRevealPos(0);
+    setScreen("queue");
+  };
+
+  // ─────────── Viewing flow ───────────
+  const beginCover = (name: string, instruction: string, cb: () => void) => {
+    setCoverName(name);
+    setCoverInstruction(instruction);
+    coverCbRef.current = cb;
+    setShowCover(true);
+  };
+  const hideCover = () => {
+    setShowCover(false);
+    const cb = coverCbRef.current;
+    coverCbRef.current = null;
+    if (cb) cb();
+  };
+
+  const startNextViewing = () => {
+    if (queuePos >= viewQueue.length) {
+      startDrawingPhase();
       return;
     }
-    if ([3, 2, 1].includes(timeLeft) && !tickRef.current.played.has(timeLeft)) {
-      tickRef.current.played.add(timeLeft);
-      cues.tick(4 - timeLeft);
+    const entry = viewQueue[queuePos];
+    setRevealPos(0);
+    const names = entry.pair.map((it) => teams[it.teamIdx].members[it.memberIdx].name).join(" & ");
+    const tns = entry.pair.map((it) => teams[it.teamIdx].name).join(" + ");
+    beginCover(names, `Both step up together — ${tns}`, () => {
+      setCurrentGridIdx(0);
+      setViewTimerLeft(viewTime);
+      setScreen("viewing");
+    });
+  };
+
+  const afterReveal = () => {
+    const entry = viewQueue[queuePos];
+    const nextPos = revealPos + 1;
+    if (entry && nextPos < entry.pair.length) {
+      const nextItem = entry.pair[nextPos];
+      const nm = teams[nextItem.teamIdx].members[nextItem.memberIdx];
+      const tm = teams[nextItem.teamIdx];
+      beginCover(nm.name, `Hand the iPad to ${nm.name} — ${tm.name}`, () => {
+        setRevealPos(nextPos);
+        setScreen("qreveal");
+      });
+    } else {
+      const newPos = queuePos + 1;
+      setQueuePos(newPos);
+      setRevealPos(0);
+      if (newPos >= viewQueue.length) startDrawingPhase();
+      else setScreen("queue");
     }
-    const t = setTimeout(() => setTimeLeft((v) => v - 1), 1000);
-    return () => clearTimeout(t);
-  }, [phase, timeLeft, drawingTimerEnabled, drawingTimerDuration]);
+  };
 
-  // Drawing timer
-  useEffect(() => {
-    if (phase !== "drawing" || drawTimeLeft === null) return;
-    if (drawTimeLeft <= 0) {
-      cues.end();
-      setPhase("reveal");
-      return;
+  // ─────────── Drawing ───────────
+  const startDrawingPhase = () => {
+    setDrawTime(drawTimeCfg);
+    setDrawTimerLeft(drawTimeCfg);
+    setScreen("drawing");
+  };
+
+  // ─────────── Scoring ───────────
+  const setupScoring = () => {
+    const n = gridSize;
+    const empty = () =>
+      Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
+    setScoringInputs([empty(), empty()]);
+    setScoringTeam(0);
+  };
+
+  const toggleScoringCell = (r: number, c: number) => {
+    setScoringInputs((prev) => {
+      const next = prev.map((m) => m.map((row) => [...row]));
+      next[scoringTeam][r][c] = next[scoringTeam][r][c] ? 0 : 1;
+      return next;
+    });
+  };
+
+  const confirmScores = async () => {
+    const recall = grids[recallGridIdx];
+    const n = gridSize;
+    const half = n / 2;
+    const results: RoundScore[] = teams.map((team, ti) => {
+      const tapped = scoringInputs[ti];
+      let totalCorrect = 0, totalWrong = 0, totalMissed = 0;
+      const memberScores: MemberScore[] = team.members.map((member, mi) => {
+        const entry = viewQueue.find((e) => e.memberIdx === mi);
+        const item = entry?.pair.find((p) => p.teamIdx === ti);
+        const quads = item?.quadrants ?? [];
+        let correct = 0, wrong = 0, missed = 0, total = 0, filled = 0;
+        quads.forEach((q) => {
+          const rS = q < 2 ? 0 : half, rE = q < 2 ? half : n;
+          const cS = q % 2 === 0 ? 0 : half, cE = q % 2 === 0 ? half : n;
+          for (let r = rS; r < rE; r++) for (let c = cS; c < cE; c++) {
+            total++;
+            const actual = recall[r][c];
+            const sub = tapped[r][c];
+            if (actual === 1) filled++;
+            if (actual === 1 && sub === 1) correct++;
+            else if (actual === 0 && sub === 1) wrong++;
+            else if (actual === 1 && sub === 0) missed++;
+          }
+        });
+        totalCorrect += correct; totalWrong += wrong; totalMissed += missed;
+        const denom = filled + wrong;
+        const pct = denom > 0 ? Math.round((correct / denom) * 100) : 0;
+        return { name: member.name, quadrants: quads, correct, wrong, missed, total, filled, pct };
+      });
+      let totalFilled = 0;
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (recall[r][c] === 1) totalFilled++;
+      const denom = totalFilled + totalWrong;
+      const pct = denom > 0 ? Math.round((totalCorrect / denom) * 100) : 0;
+      return { totalCorrect, totalWrong, totalMissed, pct, memberScores };
+    });
+    setRoundScores(results);
+
+    // Adaptive + persistence
+    let nextDiff = difficulty;
+    let dc: "up" | "down" | "same" = "same";
+    if (!isPractice) {
+      const maxPct = Math.max(results[0].pct, results[1].pct);
+      if (maxPct >= 85) { nextDiff = Math.min(4, difficulty + 1); dc = "up"; }
+      else if (maxPct < 60) { nextDiff = Math.max(1, difficulty - 1); dc = "down"; }
+      setSessionScores(([a, b]) => [a + results[0].pct, b + results[1].pct]);
     }
-    if ([3, 2, 1].includes(drawTimeLeft)) cues.tick(4 - drawTimeLeft);
-    const t = setTimeout(() => setDrawTimeLeft((v) => (v ?? 1) - 1), 1000);
-    return () => clearTimeout(t);
-  }, [phase, drawTimeLeft]);
+    setDifficulty(nextDiff);
+    setDiffChange(dc);
+    generateTipsFor(results);
 
-  // Adaptive recommendation: rolling avg of last 2 rounds per team
-  useEffect(() => {
-    if (results.length === 0) return;
-    const last = results.slice(-2);
-    const t1Avg = last.reduce((s, r) => s + r.team1Score / r.maxScore, 0) / last.length;
-    const t2Avg = last.reduce((s, r) => s + r.team2Score / r.maxScore, 0) / last.length;
-    setTeam1Recommend(recommendLevel(currentLevel, t1Avg));
-    setTeam2Recommend(recommendLevel(currentLevel, t2Avg));
-  }, [results, currentLevel]);
+    // Persist round + participant scores
+    if (sessionId) {
+      try {
+        await supabase.from("rounds").insert({
+          session_id: sessionId,
+          round_number: round,
+          difficulty,
+          data: { isPractice, gridSize: n, gridCount, recallGridIdx, grids, teams, viewQueue },
+          scores: { results, sessionScores },
+        });
+        const rows: {
+          participant_id: string;
+          session_id: string;
+          round_number: number;
+          score: number;
+          dimension: string;
+        }[] = [];
+        results.forEach((rs, ti) => {
+          rs.memberScores.forEach((ms) => {
+            rows.push({
+              participant_id: `${teams[ti].name}::${ms.name}`,
+              session_id: sessionId,
+              round_number: round,
+              score: ms.pct,
+              dimension: "grid_accuracy",
+            });
+          });
+        });
+        if (rows.length) await supabase.from("participant_scores").insert(rows);
+      } catch {}
+    }
 
-  if (!facilitator) return null;
+    setScreen("results");
+  };
 
-  // ===== SETUP =====
-  if (phase === "setup") {
-    const valid = config.playersPerTeam >= 2 && config.playersPerTeam <= 4 && [4, 6, 8].includes(config.totalRounds);
-    return (
-      <Shell title="The Grid — Session Setup">
-        <Card className="space-y-5 p-6">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Team 1 name">
-              <Input value={config.team1Name} onChange={(e) => setConfig({ ...config, team1Name: e.target.value })} />
-            </Field>
-            <Field label="Team 2 name">
-              <Input value={config.team2Name} onChange={(e) => setConfig({ ...config, team2Name: e.target.value })} />
-            </Field>
+  const generateTipsFor = (rs: RoundScore[]) => {
+    const out: { team: string; text: string }[] = [];
+    teams.forEach((team, ti) => {
+      const r = rs[ti];
+      const pct = r.pct;
+      const ts: string[] = [];
+      if (pct < 60) {
+        ts.push(pick(TIPS.low_accuracy));
+        if (r.totalWrong > r.totalMissed) ts.push(pick(TIPS.missed_boxes));
+        else ts.push(pick(TIPS.low_order));
+      } else if (pct < 80) {
+        if (r.totalWrong > 2) ts.push(pick(TIPS.missed_boxes));
+        const weak = r.memberScores.reduce((a, b) => (a.pct < b.pct ? a : b), r.memberScores[0]);
+        if (weak && weak.pct < pct - 20) ts.push(pick(TIPS.low_order));
+        if (ts.length === 0) ts.push(pick(TIPS.low_accuracy));
+      } else {
+        ts.push(pick(TIPS.good_performance));
+      }
+      ts.forEach((t) => out.push({ team: team.name, text: t }));
+    });
+    setTips(out);
+  };
+
+  const nextRound = () => {
+    let newRound = round;
+    if (isPractice) {
+      setIsPractice(false);
+      newRound = 1;
+    } else {
+      newRound = round + 1;
+    }
+    setRound(newRound);
+    startRound(teams, difficulty, false);
+  };
+
+  const confirmEndSession = () => setEndModal(true);
+  const endSessionConfirmed = async () => {
+    setEndModal(false);
+    if (sessionId) {
+      try {
+        await supabase
+          .from("sessions")
+          .update({ status: "ended", ended_at: new Date().toISOString() })
+          .eq("id", sessionId);
+      } catch {}
+    }
+    setScreen("final");
+  };
+
+  // ─────────── Render ───────────
+  return (
+    <div style={{ background: "#0a0a0a", color: "#f5f5f0", minHeight: "100vh", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;700&display=swap');
+        .tg-screen { animation: tg-fade .22s ease; }
+        @keyframes tg-fade { from { opacity:0; transform:translateY(12px);} to { opacity:1; transform:translateY(0);} }
+        .tg-btn-primary { background:#e8ff47; color:#0a0a0a; border:none; border-radius:12px; font-family:'Space Mono',monospace; font-size:15px; font-weight:700; letter-spacing:1px; padding:18px; cursor:pointer; text-transform:uppercase; width:100%; }
+        .tg-btn-primary:active { opacity:.85; transform:scale(.98); }
+        .tg-btn-secondary { background:transparent; color:#f5f5f0; border:1px solid #333; border-radius:12px; font-family:'Space Mono',monospace; font-size:13px; padding:14px; cursor:pointer; width:100%; }
+        .tg-seg-btn { flex:1; padding:8px 4px; border-radius:6px; border:none; background:transparent; color:#666; font-family:'Space Mono',monospace; font-size:11px; cursor:pointer; }
+        .tg-seg-btn.active { background:#e8ff47; color:#0a0a0a; font-weight:700; }
+        .tg-input { background:#2a2a2a; border:1px solid #333; border-radius:8px; color:#f5f5f0; font-family:'DM Sans',sans-serif; font-size:16px; padding:11px 14px; width:100%; outline:none; }
+        .tg-input:focus { border-color:#e8ff47; }
+      `}</style>
+
+      {/* Back link */}
+      {screen === "setup" && (
+        <div style={{ padding: "16px 24px 0" }}>
+          <Link to="/" style={{ color: "#666", textDecoration: "none", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <ArrowLeft size={14} /> Back
+          </Link>
+        </div>
+      )}
+
+      {/* COVER */}
+      {showCover && (
+        <div style={{ position: "fixed", inset: 0, background: "#0a0a0a", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 22, textAlign: "center", padding: 44 }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 48, fontWeight: 700, letterSpacing: -2, color: "#e8ff47", lineHeight: 1 }}>THE<br />GRID</div>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 28, fontWeight: 700 }}>{coverName}</div>
+          <div style={{ fontSize: 14, color: "#666" }}>{coverInstruction}</div>
+          <button className="tg-btn-primary" style={{ maxWidth: 300 }} onClick={hideCover}>I'M READY →</button>
+        </div>
+      )}
+
+      {/* SETUP */}
+      {screen === "setup" && (
+        <div className="tg-screen" style={{ padding: "20px 28px 40px", display: "flex", flexDirection: "column", gap: 24 }}>
+          <div>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 38, fontWeight: 700, letterSpacing: -2, color: "#e8ff47", lineHeight: 1 }}>THE<span style={{ color: "#f5f5f0" }}>GRID</span></div>
+            <div style={{ fontSize: 12, color: "#666", letterSpacing: 2, textTransform: "uppercase", marginTop: 4 }}>Memory · Recall · Precision</div>
+          </div>
+          <div style={{ background: "rgba(232,255,71,0.08)", border: "1px solid rgba(232,255,71,0.25)", borderRadius: 12, padding: "14px 18px", fontSize: 13, color: "#ccc", lineHeight: 1.5 }}>
+            <strong style={{ color: "#e8ff47" }}>Practice Round Included</strong> — The session starts with one practice round so both teams learn the flow before scores count.
           </div>
 
-          <Field label="Players per team (2–4)">
-            <div className="flex gap-2">
-              {[2, 3, 4].map((n) => (
-                <Button
-                  key={n}
-                  variant={config.playersPerTeam === n ? "default" : "outline"}
-                  onClick={() => setConfig({ ...config, playersPerTeam: n })}
-                >
-                  {n}
-                </Button>
-              ))}
-            </div>
-          </Field>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <PlayerNames
-              label={config.team1Name}
-              count={config.playersPerTeam}
-              names={config.team1Players}
-              onChange={(names) => setConfig({ ...config, team1Players: names })}
-            />
-            <PlayerNames
-              label={config.team2Name}
-              count={config.playersPerTeam}
-              names={config.team2Players}
-              onChange={(names) => setConfig({ ...config, team2Players: names })}
-            />
-          </div>
-
-          <Field label="Number of rounds">
-            <div className="flex gap-2">
-              {[4, 6, 8].map((n) => (
-                <Button
-                  key={n}
-                  variant={config.totalRounds === n ? "default" : "outline"}
-                  onClick={() => setConfig({ ...config, totalRounds: n })}
-                >
-                  {n}
-                </Button>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="Starting difficulty">
-            <div className="flex gap-2">
-              {[1, 2, 3].map((n) => (
-                <Button
-                  key={n}
-                  variant={config.startingLevel === n ? "default" : "outline"}
-                  onClick={() => setConfig({ ...config, startingLevel: n as GridLevel })}
-                >
-                  Level {n}
-                </Button>
-              ))}
-            </div>
-          </Field>
-
-          <Button
-            disabled={!valid}
-            onClick={async () => {
-              const { data, error } = await supabase
-                .from("sessions")
-                .insert({
-                  game_type: "the_grid",
-                  facilitator_id: facilitator.id,
-                  config: config as any,
-                })
-                .select("id")
-                .single();
-              if (error || !data) return toast.error(error?.message ?? "Failed");
-              setSessionId(data.id);
-              setCurrentLevel(config.startingLevel);
-              setTeam1Recommend(config.startingLevel);
-              setTeam2Recommend(config.startingLevel);
-              setPhase("round_setup");
-            }}
-            className="w-full"
-          >
-            Start session
-          </Button>
-        </Card>
-      </Shell>
-    );
-  }
-
-  // ===== ROUND SETUP =====
-  if (phase === "round_setup") {
-    const teamsDiverge = team1Recommend !== team2Recommend;
-    const cumulT1 = results.reduce((s, r) => s + r.team1Score, 0);
-    const cumulT2 = results.reduce((s, r) => s + r.team2Score, 0);
-    const level4Available = team1Recommend === 4 || team2Recommend === 4;
-
-    return (
-      <Shell title={`Round ${roundNum} of ${config.totalRounds}`}>
-        <Card className="p-6">
-          <div className="mb-4 flex justify-between text-sm text-muted-foreground">
-            <span>{config.team1Name}: {cumulT1}</span>
-            <span>{config.team2Name}: {cumulT2}</span>
-          </div>
-
-          {results.length > 0 && (
-            <div className="mb-4 rounded-lg bg-muted/50 p-3 text-sm">
-              <div className="font-medium">Adaptive recommendation</div>
-              {teamsDiverge ? (
-                <div className="mt-1 text-muted-foreground">
-                  {config.team1Name} → Level {team1Recommend} | {config.team2Name} → Level {team2Recommend}.
-                  Pick one for this round.
+          {/* Teams */}
+          {([1, 2] as const).map((t) => {
+            const name = t === 1 ? team1Name : team2Name;
+            const setName = t === 1 ? setTeam1Name : setTeam2Name;
+            const count = t === 1 ? count1 : count2;
+            const setCount = t === 1 ? setCount1 : setCount2;
+            const members = t === 1 ? members1 : members2;
+            const dotColor = t === 1 ? "#e8ff47" : "#60a5fa";
+            return (
+              <div key={t} style={{ background: "#1a1a1a", borderRadius: 12, padding: 18, display: "flex", flexDirection: "column", gap: 14, border: "1px solid #333" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 11, height: 11, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                  <input className="tg-input" value={name} onChange={(e) => setName(e.target.value)} placeholder={`Team ${t} name`} />
                 </div>
-              ) : (
-                <div className="mt-1 text-muted-foreground">Suggested: Level {team1Recommend}</div>
-              )}
-            </div>
-          )}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 13, color: "#aaa" }}>Members</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <button onClick={() => setCount(Math.max(1, count - 1))} style={{ width: 34, height: 34, borderRadius: "50%", border: "1px solid #333", background: "#2a2a2a", color: "#f5f5f0", fontSize: 19, cursor: "pointer" }}>−</button>
+                    <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 20, minWidth: 22, textAlign: "center", color: "#e8ff47" }}>{count}</div>
+                    <button onClick={() => setCount(Math.min(4, count + 1))} style={{ width: 34, height: 34, borderRadius: "50%", border: "1px solid #333", background: "#2a2a2a", color: "#f5f5f0", fontSize: 19, cursor: "pointer" }}>+</button>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                  {Array.from({ length: count }).map((_, i) => (
+                    <div key={i} style={{ position: "relative" }}>
+                      <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#666" }}>{i + 1}</span>
+                      <input className="tg-input" style={{ paddingLeft: 32 }} value={members[i] ?? ""} onChange={(e) => updateMember(t, i, e.target.value)} placeholder={`Member ${i + 1}`} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
 
-          <Field label="Difficulty for this round">
-            <div className="flex flex-wrap gap-2">
-              {[1, 2, 3].map((n) => (
-                <Button
-                  key={n}
-                  variant={currentLevel === n ? "default" : "outline"}
-                  onClick={() => setCurrentLevel(n as GridLevel)}
-                >
-                  Level {n}
-                </Button>
+          <div style={{ display: "flex", gap: 10 }}>
+            <ConfigCard label="Grid Size" options={[6, 8, 10]} value={gridSizeCfg} onChange={setGridSizeCfg} suffix="×" repeat />
+            <ConfigCard label="View Time" options={[5, 8, 12]} value={viewTimeCfg} onChange={setViewTimeCfg} suffix="s" />
+          </div>
+
+          <div style={{ background: "#1a1a1a", borderRadius: 12, border: "1px solid #333", padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#666" }}>Session Length</div>
+                <div style={{ fontSize: 13, color: "#aaa", marginTop: 3 }}>~{estRounds} round{estRounds !== 1 ? "s" : ""} · ~{Math.round(roundMinutes)} min/round</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", background: "#2a2a2a", borderRadius: 8, padding: 3, gap: 2 }}>
+              {[15, 30, 45, 60].map((v) => (
+                <button key={v} className={`tg-seg-btn${sessionDur === v ? " active" : ""}`} onClick={() => setSessionDur(v)}>{v}m</button>
               ))}
-              {level4Available && (
-                <Button
-                  variant={currentLevel === 4 ? "default" : "outline"}
-                  onClick={() => setCurrentLevel(4)}
-                >
-                  Level 4 (max)
-                </Button>
-              )}
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Sub-grid: {LEVEL_SPECS[currentLevel].size}×{LEVEL_SPECS[currentLevel].size} ·
-              Default view: {LEVEL_SPECS[currentLevel].viewingTime}s · Colors: {LEVEL_SPECS[currentLevel].colors}
-            </p>
-          </Field>
-
-          <Field label="Viewing time override (4–15s, optional)">
-            <Input
-              type="number"
-              min={4}
-              max={15}
-              placeholder={String(LEVEL_SPECS[currentLevel].viewingTime)}
-              value={viewingTimeOverride ?? ""}
-              onChange={(e) => setViewingTimeOverride(e.target.value ? Number(e.target.value) : null)}
-              className="w-32"
-            />
-          </Field>
-
-          <Field label="Drawing timer (optional)">
-            <div className="flex items-center gap-3">
-              <Switch checked={drawingTimerEnabled} onCheckedChange={setDrawingTimerEnabled} />
-              <span className="text-sm text-muted-foreground">
-                {drawingTimerEnabled ? "Enabled" : "Disabled"}
-              </span>
-              {drawingTimerEnabled && (
-                <Input
-                  type="number"
-                  min={30}
-                  max={300}
-                  value={drawingTimerDuration}
-                  onChange={(e) => setDrawingTimerDuration(Number(e.target.value))}
-                  className="w-28"
-                />
-              )}
-            </div>
-          </Field>
-
-          <div className="flex gap-2">
-            <Button
-              onClick={() => {
-                setGrid(generateGrid(currentLevel, config.playersPerTeam));
-              }}
-            >
-              {grid ? "Regenerate" : "Generate Grid"}
-            </Button>
-            {grid && (
-              <Button
-                variant="default"
-                onClick={() => {
-                  tickRef.current.played.clear();
-                  setTimeLeft(viewingTimeOverride ?? LEVEL_SPECS[currentLevel].viewingTime);
-                  cues.start();
-                  setPhase("viewing");
-                }}
-              >
-                <Play className="mr-1 h-4 w-4" /> Start Viewing Timer
-              </Button>
-            )}
           </div>
 
-          {grid && (
-            <div className="mt-6">
-              <div className="mb-2 text-xs text-muted-foreground">Preview (facilitator only)</div>
-              <GridDisplay grid={grid} layout={sectionLayout(config.playersPerTeam)} small />
+          <div style={{ background: "#1a1a1a", borderRadius: 12, border: "1px solid #333", padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#666" }}>Draw Timer</div>
+              <div style={{ fontSize: 13, color: "#aaa", marginTop: 3 }}>Team drawing phase</div>
             </div>
-          )}
-        </Card>
-      </Shell>
-    );
-  }
+            <div style={{ display: "flex", background: "#2a2a2a", borderRadius: 8, padding: 3, gap: 2 }}>
+              {[60, 120, 180].map((v) => (
+                <button key={v} className={`tg-seg-btn${drawTimeCfg === v ? " active" : ""}`} onClick={() => setDrawTimeCfg(v)}>{v / 60}m</button>
+              ))}
+            </div>
+          </div>
 
-  // ===== VIEWING =====
-  if (phase === "viewing" && grid) {
-    return (
-      <Shell title={`Viewing — Round ${roundNum}`}>
-        <div className="mb-6 text-center">
-          <div className="text-7xl font-bold tabular-nums">{timeLeft}</div>
-          <p className="mt-2 text-sm text-muted-foreground">Players: memorize your section.</p>
+          <button className="tg-btn-primary" onClick={startGame}>START SESSION →</button>
         </div>
-        <GridDisplay grid={grid} layout={sectionLayout(config.playersPerTeam)} team1Names={config.team1Players} team2Names={config.team2Players} />
-        <div className="mt-6 flex justify-center">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setTimeLeft(0);
-            }}
-          >
-            End early
-          </Button>
-        </div>
-      </Shell>
-    );
-  }
+      )}
 
-  // ===== DRAWING =====
-  if (phase === "drawing") {
-    return (
-      <Shell title={`Drawing — Round ${roundNum}`}>
-        <Card className="p-8 text-center">
-          <EyeOff className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
-          <h2 className="text-2xl font-semibold">Grid hidden</h2>
-          <p className="mt-2 text-muted-foreground">Both teams: reproduce the grid on your shared sheet.</p>
-
-          {drawTimeLeft !== null && (
-            <div className="mt-6 text-5xl font-bold tabular-nums">{drawTimeLeft}s</div>
-          )}
-
-          <div className="mt-8 flex justify-center gap-2">
-            <Button onClick={() => setPhase("reveal")}>
-              <Check className="mr-1 h-4 w-4" /> Done drawing — reveal
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (confirm("Cancel this round? It will not be recorded.")) {
-                  setGrid(null);
-                  setDrawTimeLeft(null);
-                  setPhase("round_setup");
-                }
-              }}
-            >
-              Cancel round
-            </Button>
+      {/* QUEUE */}
+      {screen === "queue" && (
+        <div className="tg-screen" style={{ padding: "44px 28px", display: "flex", flexDirection: "column", gap: 28, alignItems: "center", textAlign: "center", justifyContent: "center", minHeight: "100vh" }}>
+          <div style={{ background: isPractice ? "rgba(232,255,71,0.1)" : "#1a1a1a", border: `1px solid ${isPractice ? "rgba(232,255,71,0.3)" : "#333"}`, borderRadius: 100, padding: "7px 18px", fontFamily: "'Space Mono',monospace", fontSize: 11, letterSpacing: 2, color: isPractice ? "#e8ff47" : "#666", textTransform: "uppercase" }}>
+            {isPractice ? "PRACTICE ROUND" : `ROUND ${round}`}
           </div>
-        </Card>
-      </Shell>
-    );
-  }
-
-  // ===== REVEAL =====
-  if (phase === "reveal" && grid) {
-    return (
-      <Shell title="Answer">
-        <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground">
-          <Eye className="h-4 w-4" /> Compare each team's drawing to the answer.
-        </div>
-        <GridDisplay grid={grid} layout={sectionLayout(config.playersPerTeam)} team1Names={config.team1Players} team2Names={config.team2Players} />
-        <div className="mt-6 flex justify-center">
-          <Button onClick={() => setPhase("scoring")}>Score this round</Button>
-        </div>
-      </Shell>
-    );
-  }
-
-  // ===== SCORING =====
-  if (phase === "scoring") {
-    const max = totalCells(currentLevel, config.playersPerTeam);
-    const t1n = Number(team1Score);
-    const t2n = Number(team2Score);
-    const valid = !isNaN(t1n) && !isNaN(t2n) && t1n >= 0 && t1n <= max && t2n >= 0 && t2n <= max && team1Score !== "" && team2Score !== "";
-    return (
-      <Shell title={`Score — Round ${roundNum}`}>
-        <Card className="space-y-5 p-6">
-          <div className="text-sm text-muted-foreground">Max possible: {max} cells</div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={`${config.team1Name} score`}>
-              <Input
-                type="number"
-                min={0}
-                max={max}
-                value={team1Score}
-                onChange={(e) => setTeam1Score(e.target.value)}
-                autoFocus
-              />
-              {team1Score && <div className="mt-1 text-xs text-muted-foreground">{Math.round((t1n / max) * 100)}%</div>}
-            </Field>
-            <Field label={`${config.team2Name} score`}>
-              <Input
-                type="number"
-                min={0}
-                max={max}
-                value={team2Score}
-                onChange={(e) => setTeam2Score(e.target.value)}
-              />
-              {team2Score && <div className="mt-1 text-xs text-muted-foreground">{Math.round((t2n / max) * 100)}%</div>}
-            </Field>
-          </div>
-          <Button
-            disabled={!valid}
-            className="w-full"
-            onClick={async () => {
-              const result: RoundResult = {
-                roundNumber: roundNum,
-                level: currentLevel,
-                team1Score: t1n,
-                team2Score: t2n,
-                maxScore: max,
-              };
-              const newResults = [...results, result];
-              setResults(newResults);
-              if (sessionId) {
-                await supabase.from("rounds").insert({
-                  session_id: sessionId,
-                  round_number: roundNum,
-                  difficulty: currentLevel,
-                  data: { layout: sectionLayout(config.playersPerTeam) } as any,
-                  scores: result as any,
-                });
-              }
-              setPhase("round_summary");
-            }}
-          >
-            Confirm scores
-          </Button>
-        </Card>
-      </Shell>
-    );
-  }
-
-  // ===== ROUND SUMMARY =====
-  if (phase === "round_summary") {
-    const last = results[results.length - 1];
-    const cumulT1 = results.reduce((s, r) => s + r.team1Score, 0);
-    const cumulT2 = results.reduce((s, r) => s + r.team2Score, 0);
-    const isFinal = roundNum >= config.totalRounds;
-    return (
-      <Shell title={`Round ${roundNum} summary`}>
-        <Card className="space-y-4 p-6">
-          <div className="grid grid-cols-2 gap-4">
-            <Stat label={config.team1Name} value={`${last.team1Score} / ${last.maxScore}`} sub={`Total ${cumulT1}`} />
-            <Stat label={config.team2Name} value={`${last.team2Score} / ${last.maxScore}`} sub={`Total ${cumulT2}`} />
-          </div>
-          <div className="rounded-lg bg-muted/50 p-3 text-sm">
-            <div className="font-medium">Leader</div>
-            <div className="text-muted-foreground">
-              {cumulT1 === cumulT2
-                ? "Tied"
-                : cumulT1 > cumulT2
-                  ? config.team1Name
-                  : config.team2Name}
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, alignItems: "center" }}>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 12, letterSpacing: 3, textTransform: "uppercase", color: "#666" }}>Viewing Order</div>
+            <div style={{ fontSize: 12, color: "#666", maxWidth: 260, lineHeight: 1.5 }}>
+              {isPractice ? "This round does not count toward scores. Learn the flow." : "Members pair up by position — both teams view together, then each gets their quadrant reveal."}
             </div>
           </div>
-          <div className="flex gap-2">
-            {isFinal ? (
-              <Button
-                className="w-full"
-                onClick={async () => {
-                  if (sessionId) {
-                    await supabase
-                      .from("sessions")
-                      .update({ status: "completed", ended_at: new Date().toISOString(), state: { results } as any })
-                      .eq("id", sessionId);
-                  }
-                  setPhase("results");
-                }}
-              >
-                View session results
-              </Button>
-            ) : (
-              <Button
-                className="w-full"
-                onClick={() => {
-                  setRoundNum(roundNum + 1);
-                  setGrid(null);
-                  setTeam1Score("");
-                  setTeam2Score("");
-                  setDrawTimeLeft(null);
-                  setDrawingTimerEnabled(false); // sticky off per PRD
-                  setViewingTimeOverride(null);
-                  // Pre-select recommendation
-                  setCurrentLevel(team1Recommend);
-                  setPhase("round_setup");
-                }}
-              >
-                Next round
-              </Button>
-            )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", maxWidth: 400 }}>
+            {viewQueue.map((entry, idx) => {
+              const done = idx < queuePos, current = idx === queuePos;
+              return (
+                <div key={idx} style={{ background: "#1a1a1a", border: `1px solid ${current ? "#e8ff47" : "#333"}`, borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, fontSize: 15, opacity: done ? 0.32 : 1 }}>
+                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, color: current ? "#e8ff47" : "#666", minWidth: 18 }}>{idx + 1}</div>
+                  <div style={{ flex: 1, textAlign: "left" }}>
+                    {entry.pair.map((it, i) => (
+                      <span key={i}>
+                        {i > 0 && <span style={{ color: "#666", margin: "0 6px" }}>+</span>}
+                        <strong>{teams[it.teamIdx].members[it.memberIdx].name}</strong>{" "}
+                        <span style={{ color: "#666", fontSize: 11 }}>{teams[it.teamIdx].name}</span>
+                      </span>
+                    ))}
+                  </div>
+                  {done && <div style={{ color: "#4ade80", fontSize: 17 }}>✓</div>}
+                </div>
+              );
+            })}
           </div>
-        </Card>
-      </Shell>
-    );
-  }
+          <button className="tg-btn-primary" style={{ maxWidth: 380 }} onClick={startNextViewing}>
+            {queuePos === 0 ? "BEGIN →" : "NEXT PAIR →"}
+          </button>
+        </div>
+      )}
 
-  // ===== RESULTS =====
-  if (phase === "results") {
-    const totalT1 = results.reduce((s, r) => s + r.team1Score, 0);
-    const totalT2 = results.reduce((s, r) => s + r.team2Score, 0);
-    const winner = totalT1 === totalT2 ? "Perfect Draw" : totalT1 > totalT2 ? config.team1Name : config.team2Name;
-    const t1Best = Math.max(...results.map((r) => r.team1Score));
-    const t2Best = Math.max(...results.map((r) => r.team2Score));
-    const t1Wins = results.filter((r) => r.team1Score > r.team2Score).length;
-    const t2Wins = results.filter((r) => r.team2Score > r.team1Score).length;
-    const t1MaxLevel = Math.max(...results.map((r) => r.level));
-    const t2MaxLevel = Math.max(...results.map((r) => r.level));
+      {/* VIEWING */}
+      {screen === "viewing" && grids[currentGridIdx] && (
+        <ViewingScreen
+          gridSize={gridSize}
+          grid={grids[currentGridIdx]}
+          viewTime={viewTime}
+          timerLeft={viewTimerLeft}
+          gridCount={gridCount}
+          currentGridIdx={currentGridIdx}
+          entry={viewQueue[queuePos]}
+          teams={teams}
+        />
+      )}
 
-    return (
-      <Shell title="Session results">
-        <Card className="p-6">
-          <div className="mb-6 text-center">
-            <div className="text-sm uppercase tracking-wider text-muted-foreground">Winner</div>
-            <div className="mt-1 text-4xl font-bold">{winner}</div>
-            <div className="mt-1 text-muted-foreground">
-              {totalT1} – {totalT2}
-            </div>
+      {/* QREVEAL */}
+      {screen === "qreveal" && viewQueue[queuePos] && (
+        <RevealScreen
+          item={viewQueue[queuePos].pair[revealPos]}
+          teams={teams}
+          gridSize={gridSize}
+          gridCount={gridCount}
+          recallGridIdx={recallGridIdx}
+          onDone={afterReveal}
+        />
+      )}
+
+      {/* DRAWING */}
+      {screen === "drawing" && (
+        <div className="tg-screen" style={{ padding: "36px 28px", display: "flex", flexDirection: "column", gap: 24, alignItems: "center", justifyContent: "center", textAlign: "center", minHeight: "100vh" }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#666" }}>{isPractice ? "Practice Round — Drawing Phase" : "Drawing Phase"}</div>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 28, fontWeight: 700, lineHeight: 1.1 }}>RECONSTRUCT<br /><span style={{ color: "#e8ff47" }}>THE GRID</span></div>
+          <div style={{ fontSize: 14, color: "#666", maxWidth: 300, lineHeight: 1.6 }}>All teams work on their physical sheets simultaneously. Reproduce the full grid from memory.</div>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 72, fontWeight: 700, lineHeight: 1, color: drawTimerLeft <= 10 ? "#f87171" : "#e8ff47" }}>
+            {Math.floor(drawTimerLeft / 60)}:{(drawTimerLeft % 60).toString().padStart(2, "0")}
           </div>
-
-          <div className="mb-6 overflow-x-auto rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left">
-                <tr>
-                  <th className="px-3 py-2">Round</th>
-                  <th className="px-3 py-2">Level</th>
-                  <th className="px-3 py-2">{config.team1Name}</th>
-                  <th className="px-3 py-2">{config.team2Name}</th>
-                  <th className="px-3 py-2">Max</th>
-                  <th className="px-3 py-2">Winner</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r) => {
-                  const w = r.team1Score === r.team2Score ? "—" : r.team1Score > r.team2Score ? config.team1Name : config.team2Name;
+          <div style={{ width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", gap: 7 }}>
+            {teams.map((team, ti) => (
+              <div key={ti}>
+                <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "#666", marginBottom: 3, paddingLeft: 3, marginTop: 8 }}>{team.name}</div>
+                {team.members.map((m, mi) => {
+                  const entry = viewQueue.find((e) => e.memberIdx === mi);
+                  const item = entry?.pair.find((p) => p.teamIdx === ti);
+                  if (!item) return null;
                   return (
-                    <tr key={r.roundNumber} className="border-t">
-                      <td className="px-3 py-2">{r.roundNumber}</td>
-                      <td className="px-3 py-2">L{r.level}</td>
-                      <td className="px-3 py-2">{r.team1Score}</td>
-                      <td className="px-3 py-2">{r.team2Score}</td>
-                      <td className="px-3 py-2">{r.maxScore}</td>
-                      <td className="px-3 py-2 font-medium">{w}</td>
-                    </tr>
+                    <div key={mi} style={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 9, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, textAlign: "left", marginTop: 6 }}>
+                      <div style={{ fontSize: 14, flex: 1 }}>{m.name}</div>
+                      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, color: "#e8ff47", background: "rgba(232,255,71,.1)", borderRadius: 5, padding: "3px 9px" }}>{item.quadrants.map((q) => QABBR[q]).join("+")}</div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            ))}
           </div>
+          <button className="tg-btn-primary" style={{ maxWidth: 380 }} onClick={() => { setScreen("scoring"); setupScoring(); }}>DONE DRAWING →</button>
+        </div>
+      )}
 
-          <div className="mb-4 grid grid-cols-3 gap-3 text-sm">
-            <Stat label="Best round" value={`${t1Best} vs ${t2Best}`} />
-            <Stat label="Rounds won" value={`${t1Wins} – ${t2Wins}`} />
-            <Stat label="Highest level" value={`L${t1MaxLevel} vs L${t2MaxLevel}`} />
-          </div>
-
-          <div className="mb-6 rounded-lg bg-muted/50 p-3 text-sm">
-            <div className="font-medium">Adaptive path</div>
-            <div className="mt-1 text-muted-foreground">
-              {results.map((r) => `L${r.level}`).join(" → ")}
+      {/* SCORING */}
+      {screen === "scoring" && scoringInputs.length > 0 && (
+        <div className="tg-screen" style={{ padding: "28px 20px 44px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 20, fontWeight: 700 }}>SCORE INPUT</div>
+            <div style={{ fontSize: 13, color: "#666" }}>
+              {gridCount > 1 ? `Scoring grid ${recallGridIdx + 1} — tap what each team drew` : "Tap the boxes each team shaded on their sheet"}
             </div>
           </div>
-
-          <Button asChild className="w-full">
-            <Link to="/">End session</Link>
-          </Button>
-        </Card>
-      </Shell>
-    );
-  }
-
-  return null;
-}
-
-function Shell({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted">
-      <header className="border-b bg-card/50 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-4">
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/">
-              <ArrowLeft className="mr-1 h-4 w-4" />
-              Home
-            </Link>
-          </Button>
-          <h1 className="text-lg font-semibold">{title}</h1>
+          <div style={{ display: "flex", gap: 7 }}>
+            {teams.map((team, i) => (
+              <button key={i} onClick={() => setScoringTeam(i)} style={{ flex: 1, padding: 11, borderRadius: 9, border: `1px solid ${scoringTeam === i ? "#e8ff47" : "#333"}`, background: scoringTeam === i ? "rgba(232,255,71,.07)" : "#1a1a1a", color: scoringTeam === i ? "#e8ff47" : "#555", fontFamily: "'Space Mono',monospace", fontSize: 12, cursor: "pointer", textAlign: "center" }}>{team.name}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 13, color: "#666", textAlign: "center", lineHeight: 1.6 }}>
+            Tap every box that <strong style={{ color: "#fff" }}>{teams[scoringTeam].name}</strong> shaded
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", overflow: "auto" }}>
+            <ScoringGrid
+              n={gridSize}
+              tapped={scoringInputs[scoringTeam]}
+              onToggle={toggleScoringCell}
+            />
+          </div>
+          <button className="tg-btn-primary" onClick={confirmScores}>CALCULATE SCORES →</button>
         </div>
-      </header>
-      <main className="mx-auto max-w-5xl px-6 py-8">{children}</main>
+      )}
+
+      {/* RESULTS */}
+      {screen === "results" && roundScores.length === 2 && (
+        <ResultsScreen
+          isPractice={isPractice}
+          round={round}
+          teams={teams}
+          roundScores={roundScores}
+          sessionScores={sessionScores}
+          difficulty={difficulty}
+          diffChange={diffChange}
+          tips={tips}
+          maxRounds={maxRounds}
+          onNext={nextRound}
+          onEnd={confirmEndSession}
+        />
+      )}
+
+      {/* FINAL */}
+      {screen === "final" && (
+        <FinalScreen
+          teams={teams}
+          sessionScores={sessionScores}
+          round={round}
+          onNew={() => {
+            setScreen("setup");
+            setSessionId(null);
+          }}
+        />
+      )}
+
+      {/* End modal */}
+      {endModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
+          <div style={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 16, padding: 28, width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 20 }}>
+            <div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 16, fontWeight: 700, marginBottom: 8 }}>End Session?</div>
+              <div style={{ fontSize: 13, color: "#666", lineHeight: 1.6 }}>
+                {maxRounds - round > 0
+                  ? `You are on Round ${round} of ${maxRounds}. Ending now will skip ${maxRounds - round} remaining round${maxRounds - round > 1 ? "s" : ""}. Final scores will be shown.`
+                  : "This will close the session and show final scores."}
+              </div>
+            </div>
+            <button className="tg-btn-primary" style={{ background: "#f87171", color: "#fff" }} onClick={endSessionConfirmed}>YES, END SESSION</button>
+            <button className="tg-btn-secondary" onClick={() => setEndModal(false)}>KEEP PLAYING</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+// ─────────── Sub-components ───────────
+function ConfigCard({ label, options, value, onChange, suffix, repeat }: { label: string; options: number[]; value: number; onChange: (v: number) => void; suffix: string; repeat?: boolean }) {
   return (
-    <div className="mb-4">
-      <Label className="mb-2 block text-sm font-medium">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
-      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
-
-function PlayerNames({
-  label,
-  count,
-  names,
-  onChange,
-}: {
-  label: string;
-  count: number;
-  names: string[];
-  onChange: (n: string[]) => void;
-}) {
-  return (
-    <div>
-      <Label className="mb-2 block text-sm font-medium">{label} players</Label>
-      <div className="space-y-2">
-        {Array.from({ length: count }).map((_, i) => (
-          <Input
-            key={i}
-            value={names[i] ?? ""}
-            onChange={(e) => {
-              const next = [...names];
-              next[i] = e.target.value;
-              onChange(next);
-            }}
-            placeholder={`Player ${String.fromCharCode(65 + i)}`}
-          />
+    <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 12, border: "1px solid #333", padding: 14, display: "flex", flexDirection: "column", gap: 7 }}>
+      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 3, textTransform: "uppercase", color: "#666" }}>{label}</div>
+      <div style={{ display: "flex", background: "#2a2a2a", borderRadius: 8, padding: 3, gap: 2 }}>
+        {options.map((v) => (
+          <button key={v} className={`tg-seg-btn${value === v ? " active" : ""}`} onClick={() => onChange(v)}>{v}{suffix}{repeat ? v : ""}</button>
         ))}
       </div>
     </div>
   );
 }
 
-function GridDisplay({
-  grid,
-  layout,
-  small,
-  team1Names,
-  team2Names,
-}: {
-  grid: Section[];
-  layout: { cols: number; rows: number; labels: string[] };
-  small?: boolean;
-  team1Names?: string[];
-  team2Names?: string[];
+function ViewingScreen({ gridSize, grid, viewTime, timerLeft, gridCount, currentGridIdx, entry, teams }: {
+  gridSize: number; grid: number[][]; viewTime: number; timerLeft: number; gridCount: number; currentGridIdx: number; entry: QueueEntry; teams: Team[];
 }) {
-  const cellSize = small ? "h-6 w-6" : "h-12 w-12 sm:h-16 sm:w-16";
+  const names = entry.pair.map((it) => teams[it.teamIdx].members[it.memberIdx].name).join(" & ");
+  const tns = entry.pair.map((it) => teams[it.teamIdx].name).join(" + ");
+  const circumference = 2 * Math.PI * 30;
+  const pct = timerLeft / viewTime;
+  const offset = circumference * (1 - pct);
+  const urgent = timerLeft <= 3;
   return (
-    <div
-      className="mx-auto inline-grid gap-3 rounded-xl border-4 border-foreground p-3"
-      style={{ gridTemplateColumns: `repeat(${layout.cols}, minmax(0,1fr))` }}
-    >
-      {grid.map((section, sIdx) => (
-        <div key={sIdx} className="rounded-md border-2 border-foreground/60 bg-background p-2">
-          <div className="mb-1 text-center text-xs font-medium text-muted-foreground">
-            {layout.labels[sIdx]}
-            {team1Names?.[sIdx] && team2Names?.[sIdx] && (
-              <span className="ml-1">· {team1Names[sIdx]} / {team2Names[sIdx]}</span>
-            )}
-          </div>
-          <div
-            className="grid gap-px"
-            style={{ gridTemplateColumns: `repeat(${section[0].length}, minmax(0,1fr))` }}
-          >
-            {section.flat().map((v, i) => (
-              <div
-                key={i}
-                className={`${cellSize} border border-foreground/30 ${COLOR_FILLS[v] ?? "bg-transparent"}`}
-              />
+    <div className="tg-screen" style={{ background: "#0a0a0a", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "28px 20px 40px", gap: 16, minHeight: "100vh" }}>
+      <div style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "#666" }}>{tns}</div>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 16, fontWeight: 700 }}>{names}</div>
+        </div>
+        <div style={{ position: "relative", width: 72, height: 72 }}>
+          <svg width={72} height={72} viewBox="0 0 72 72" style={{ transform: "rotate(-90deg)" }}>
+            <circle cx={36} cy={36} r={30} fill="none" stroke="#2a2a2a" strokeWidth={4} />
+            <circle cx={36} cy={36} r={30} fill="none" stroke={urgent ? "#f87171" : "#e8ff47"} strokeWidth={4} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} style={{ transition: "stroke-dashoffset 0.9s linear, stroke 0.3s" }} />
+          </svg>
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontFamily: "'Space Mono',monospace", fontSize: 20, fontWeight: 700 }}>{timerLeft}</div>
+        </div>
+      </div>
+
+      {gridCount > 1 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
+          {Array.from({ length: gridCount }).map((_, i) => (
+            <div key={i} style={{ width: 10, height: 10, borderRadius: "50%", background: i === currentGridIdx ? "#e8ff47" : "#2a2a2a", border: `1px solid ${i === currentGridIdx ? "#e8ff47" : "#333"}`, opacity: i < currentGridIdx ? 0.4 : 1 }} />
+          ))}
+        </div>
+      )}
+
+      <GridSVG n={gridSize} grid={grid} maxPx={Math.min(380, typeof window !== "undefined" ? window.innerWidth - 48 : 380)} showLabels={false} />
+
+      <div style={{ fontSize: 12, color: "#666", textAlign: "center", letterSpacing: 1 }}>
+        {gridCount > 1 ? `Grid ${currentGridIdx + 1} of ${gridCount} — memorise all of them` : "Both players memorise the full grid together"}
+      </div>
+    </div>
+  );
+}
+
+function GridSVG({ n, grid, maxPx, showLabels }: { n: number; grid: number[][]; maxPx: number; showLabels: boolean }) {
+  const size = maxPx;
+  const cellSize = size / n;
+  const half = n / 2;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block" }}>
+      {grid.map((row, r) => row.map((v, c) => (
+        <rect key={`${r}-${c}`} x={c * cellSize} y={r * cellSize} width={cellSize} height={cellSize} fill={v === 1 ? "#0a0a0a" : "#f5f5f0"} stroke="#bbb" strokeWidth={0.5} />
+      )))}
+      <line x1={0} y1={half * cellSize} x2={size} y2={half * cellSize} stroke="#e8ff47" strokeWidth={2} />
+      <line x1={half * cellSize} y1={0} x2={half * cellSize} y2={size} stroke="#e8ff47" strokeWidth={2} />
+      {showLabels && [[half * 0.5, half * 0.5], [half * 1.5, half * 0.5], [half * 0.5, half * 1.5], [half * 1.5, half * 1.5]].map(([x, y], i) => (
+        <text key={i} x={x * cellSize} y={y * cellSize} textAnchor="middle" dominantBaseline="middle" fill="rgba(232,255,71,0.4)" fontSize={cellSize * 1.1} fontFamily="Space Mono, monospace" fontWeight={700}>{QABBR[i]}</text>
+      ))}
+    </svg>
+  );
+}
+
+function RevealScreen({ item, teams, gridSize, gridCount, recallGridIdx, onDone }: {
+  item: QueueItem; teams: Team[]; gridSize: number; gridCount: number; recallGridIdx: number; onDone: () => void;
+}) {
+  const member = teams[item.teamIdx].members[item.memberIdx];
+  const n = gridSize;
+  const mini = 200;
+  const cellSize = mini / n;
+  const half = n / 2;
+  // overlay box
+  let minR = n, maxR = 0, minC = n, maxC = 0;
+  item.quadrants.forEach((q) => {
+    const rS = q < 2 ? 0 : half, rE = q < 2 ? half : n;
+    const cS = q % 2 === 0 ? 0 : half, cE = q % 2 === 0 ? half : n;
+    minR = Math.min(minR, rS); maxR = Math.max(maxR, rE);
+    minC = Math.min(minC, cS); maxC = Math.max(maxC, cE);
+  });
+  return (
+    <div className="tg-screen" style={{ background: "#0a0a0a", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 24, padding: "44px 28px", textAlign: "center", minHeight: "100vh" }}>
+      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 11, letterSpacing: 3, textTransform: "uppercase", color: "#666" }}>YOUR QUADRANT IS</div>
+      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 26, fontWeight: 700, color: "#e8ff47" }}>{member.name}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
+        <div style={{ fontSize: 12, letterSpacing: 2, textTransform: "uppercase", color: "#666" }}>You are responsible for</div>
+        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 44, fontWeight: 700, lineHeight: 1 }}>{item.quadrants.map((q) => QABBR[q]).join(" + ")}</div>
+      </div>
+      {gridCount > 1 && (
+        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 18, fontWeight: 700, color: "#e8ff47", padding: "8px 20px", background: "rgba(232,255,71,0.1)", borderRadius: 10, border: "1px solid rgba(232,255,71,0.3)" }}>
+          RECALL GRID {recallGridIdx + 1}
+        </div>
+      )}
+      <div style={{ position: "relative", display: "inline-block" }}>
+        <svg width={mini} height={mini} viewBox={`0 0 ${mini} ${mini}`} style={{ display: "block" }}>
+          {Array.from({ length: n }).map((_, r) => Array.from({ length: n }).map((_, c) => (
+            <rect key={`${r}-${c}`} x={c * cellSize} y={r * cellSize} width={cellSize} height={cellSize} fill="#f5f5f0" stroke="#bbb" strokeWidth={0.5} />
+          )))}
+          <line x1={0} y1={half * cellSize} x2={mini} y2={half * cellSize} stroke="#e8ff47" strokeWidth={2} />
+          <line x1={half * cellSize} y1={0} x2={half * cellSize} y2={mini} stroke="#e8ff47" strokeWidth={2} />
+          {[[half * 0.5, half * 0.5], [half * 1.5, half * 0.5], [half * 0.5, half * 1.5], [half * 1.5, half * 1.5]].map(([x, y], i) => (
+            <text key={i} x={x * cellSize} y={y * cellSize} textAnchor="middle" dominantBaseline="middle" fill={item.quadrants.includes(i) ? "rgba(232,255,71,0.9)" : "rgba(232,255,71,0.2)"} fontSize={cellSize * 1.1} fontFamily="Space Mono, monospace" fontWeight={700}>{QABBR[i]}</text>
+          ))}
+        </svg>
+        <div style={{ position: "absolute", top: minR * cellSize, left: minC * cellSize, width: (maxC - minC) * cellSize, height: (maxR - minR) * cellSize, border: "3px solid #e8ff47", boxShadow: "inset 0 0 0 9999px rgba(232,255,71,.1)", pointerEvents: "none", borderRadius: 2 }} />
+      </div>
+      <div style={{ fontSize: 12, color: "#666", maxWidth: 260, lineHeight: 1.5 }}>Hand the iPad back to the facilitator</div>
+      <button className="tg-btn-primary" style={{ maxWidth: 300 }} onClick={onDone}>DONE →</button>
+    </div>
+  );
+}
+
+function ScoringGrid({ n, tapped, onToggle }: { n: number; tapped: number[][]; onToggle: (r: number, c: number) => void }) {
+  const cellSize = 44;
+  const size = n * cellSize;
+  const half = n / 2;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: "block" }}>
+      {tapped.map((row, r) => row.map((v, c) => (
+        <rect key={`${r}-${c}`} x={c * cellSize + 1} y={r * cellSize + 1} width={cellSize - 2} height={cellSize - 2} rx={3} fill={v ? "#0a0a0a" : "#f5f5f0"} stroke="#888" strokeWidth={0.5} style={{ cursor: "pointer" }} onClick={() => onToggle(r, c)} />
+      )))}
+      <line x1={0} y1={half * cellSize} x2={size} y2={half * cellSize} stroke="#e8ff47" strokeWidth={2} strokeDasharray="5,3" />
+      <line x1={half * cellSize} y1={0} x2={half * cellSize} y2={size} stroke="#e8ff47" strokeWidth={2} strokeDasharray="5,3" />
+    </svg>
+  );
+}
+
+function ResultsScreen({ isPractice, round, teams, roundScores, sessionScores, difficulty, diffChange, tips, maxRounds, onNext, onEnd }: {
+  isPractice: boolean; round: number; teams: Team[]; roundScores: RoundScore[]; sessionScores: number[]; difficulty: number; diffChange: "up" | "down" | "same"; tips: { team: string; text: string }[]; maxRounds: number; onNext: () => void; onEnd: () => void;
+}) {
+  const s0 = roundScores[0].pct, s1 = roundScores[1].pct;
+  const practiceLabel = isPractice ? " — PRACTICE" : "";
+  const diffDesc = ["", "Easy (1 grid, 6×6)", "Medium (1 grid, 8×8)", "Hard (2 grids shown)", "Expert (3 grids shown)"];
+  const arrowText = diffChange === "up" ? "↑ Harder" : diffChange === "down" ? "↓ Easier" : "→ Same level";
+  const arrowColor = diffChange === "up" ? "#e8ff47" : diffChange === "down" ? "#f87171" : "#60a5fa";
+  const remaining = maxRounds - round;
+  return (
+    <div className="tg-screen" style={{ background: "#0a0a0a", padding: "36px 24px 56px", display: "flex", flexDirection: "column", gap: 24, overflowY: "auto" }}>
+      <div>
+        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 3, color: "#666", textTransform: "uppercase" }}>
+          {isPractice ? "PRACTICE ROUND RESULTS (scores don't count)" : `ROUND ${round} RESULTS`}
+        </div>
+        <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 26, fontWeight: 700, lineHeight: 1.1, marginTop: 6 }}>
+          {s0 > s1 ? <><span style={{ color: "#e8ff47" }}>{teams[0].name}</span> wins{practiceLabel}</>
+            : s1 > s0 ? <><span style={{ color: "#e8ff47" }}>{teams[1].name}</span> wins{practiceLabel}</>
+              : <span style={{ color: "#fff" }}>Perfect Draw</span>}
+        </div>
+        <div style={{ fontSize: 13, color: "#666", marginTop: 3 }}>
+          {s0 === s1 ? `Both scored ${s0}%${isPractice ? " — practice round" : " — facilitator's call"}` : `by ${Math.abs(s0 - s1)} points`}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        {teams.map((team, i) => {
+          const rs = roundScores[i];
+          const isWin = (i === 0 && s0 > s1) || (i === 1 && s1 > s0);
+          return (
+            <div key={i} style={{ flex: 1, background: isWin ? "rgba(232,255,71,.05)" : "#1a1a1a", border: `1px solid ${isWin ? "#e8ff47" : "#333"}`, borderRadius: 12, padding: "18px 14px", display: "flex", flexDirection: "column", gap: 7 }}>
+              <div style={{ fontSize: 11, color: "#666", letterSpacing: 1, textTransform: "uppercase" }}>{team.name}</div>
+              <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 36, fontWeight: 700, lineHeight: 1, color: isWin ? "#e8ff47" : "#f5f5f0" }}>{rs.pct}<span style={{ fontSize: 18 }}>%</span></div>
+              <div style={{ fontSize: 12, color: "#666" }}>✓ {rs.totalCorrect} correct &nbsp;✗ {rs.totalWrong} wrong &nbsp;◻ {rs.totalMissed} missed</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Member breakdown */}
+      <div>
+        {teams.map((team, ti) => (
+          <div key={ti} style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "#666" }}>{team.name} — by member</div>
+            {roundScores[ti].memberScores.map((ms, idx) => (
+              <div key={idx} style={{ background: "#1a1a1a", borderRadius: 9, border: "1px solid #333", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, fontSize: 14 }}>{ms.name}</div>
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#666" }}>{ms.quadrants.map((q) => QABBR[q]).join("+")}</div>
+                <div style={{ width: 70, height: 5, background: "#2a2a2a", borderRadius: 3, overflow: "hidden" }}>
+                  <div style={{ height: "100%", background: "#e8ff47", width: `${ms.pct}%`, transition: "width .5s ease" }} />
+                </div>
+                <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 12, minWidth: 34, textAlign: "right" }}>{ms.pct}%</div>
+              </div>
             ))}
           </div>
+        ))}
+      </div>
+
+      <div style={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#aaa", lineHeight: 1.5 }}>
+        {isPractice ? (
+          <><strong style={{ color: "#fff" }}>Practice complete.</strong> Round 1 will adapt difficulty from here.</>
+        ) : (
+          <>
+            <strong style={{ color: "#fff" }}>Next round:</strong>{" "}
+            <span style={{ color: arrowColor }}>{arrowText}</span> — {diffDesc[difficulty]}
+          </>
+        )}
+      </div>
+
+      {tips.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: "#666" }}>Facilitator Tips</div>
+          {tips.map((t, i) => (
+            <div key={i} style={{ background: "#1a1a1a", border: "1px solid #333", borderLeft: "3px solid #e8ff47", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: "#e8ff47", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>{t.team}</div>
+              <div style={{ fontSize: 13, color: "#ccc", lineHeight: 1.6 }}>{t.text}</div>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+        <div style={{ fontSize: 12, color: "#666", textAlign: "center", lineHeight: 1.5, padding: "0 8px" }}>
+          {isPractice ? "Practice scores don't count. Round 1 starts now!" : `Totals — ${teams[0].name}: ${sessionScores[0]}pts  |  ${teams[1].name}: ${sessionScores[1]}pts`}
+        </div>
+        <button className="tg-btn-primary" onClick={onNext}>
+          {isPractice ? "START ROUND 1 →" : remaining > 0 ? `NEXT ROUND (${remaining} left) →` : "FINAL ROUND DONE →"}
+        </button>
+        <button className="tg-btn-secondary" onClick={onEnd}>END SESSION</button>
+      </div>
+    </div>
+  );
+}
+
+function FinalScreen({ teams, sessionScores, round, onNew }: { teams: Team[]; sessionScores: number[]; round: number; onNew: () => void }) {
+  const s0 = sessionScores[0], s1 = sessionScores[1];
+  return (
+    <div className="tg-screen" style={{ padding: "36px 24px 56px", display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 10, letterSpacing: 3, color: "#666", textTransform: "uppercase" }}>
+        SESSION COMPLETE — {round} ROUND{round !== 1 ? "S" : ""}
+      </div>
+      <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 28, fontWeight: 700 }}>
+        {s0 > s1 ? <><span style={{ color: "#e8ff47" }}>{teams[0].name}</span> wins the session</>
+          : s1 > s0 ? <><span style={{ color: "#e8ff47" }}>{teams[1].name}</span> wins the session</>
+            : <span>Perfect Draw</span>}
+      </div>
+      <div style={{ fontSize: 14, color: "#666" }}>
+        {s0 === s1 ? `Both finished with ${s0} points` : `Total: ${Math.max(s0, s1)} pts vs ${Math.min(s0, s1)} pts`}
+      </div>
+      <button className="tg-btn-primary" onClick={onNew}>NEW SESSION</button>
+      <Link to="/" style={{ color: "#666", textDecoration: "none", fontSize: 13, textAlign: "center" }}>← Back to home</Link>
     </div>
   );
 }
