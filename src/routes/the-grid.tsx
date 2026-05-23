@@ -137,16 +137,18 @@ function TheGrid() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [existingParticipants, setExistingParticipants] = useState<ExistingParticipant[]>([]);
 
-  // Load existing participants from DB
+  // Load existing participants from DB (refetches whenever we land on setup)
+  const loadParticipants = async () => {
+    const { data } = await supabase
+      .from("participants")
+      .select("id, participant_id, name")
+      .order("name", { ascending: true })
+      .limit(1000);
+    if (data) setExistingParticipants(data as ExistingParticipant[]);
+  };
   useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from("participants")
-        .select("id, participant_id, name")
-        .order("name", { ascending: true });
-      if (data) setExistingParticipants(data as ExistingParticipant[]);
-    })();
-  }, []);
+    if (screen === "setup") loadParticipants();
+  }, [screen]);
 
   // Calc rounds
   const roundMinutes = useMemo(() => {
