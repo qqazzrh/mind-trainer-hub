@@ -626,7 +626,7 @@ function TheGrid() {
                             <Select
                               value={selectVal || undefined}
                               onValueChange={(v) => {
-                                if (v === "__new__") updateMember(t, i, "");
+                                if (v === "__new__") updateMember(t, i, " ");
                                 else updateMember(t, i, v);
                               }}
                             >
