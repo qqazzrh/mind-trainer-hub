@@ -16,7 +16,7 @@ export const Route = createFileRoute("/participants")({
 type P = { id: string; participant_id: string; name: string };
 
 function ParticipantsPage() {
-  const { facilitator } = useFacilitator();
+  const { facilitator, hydrated } = useFacilitator();
   const navigate = useNavigate();
   const [list, setList] = useState<P[]>([]);
   const [pid, setPid] = useState("");
@@ -24,8 +24,8 @@ function ParticipantsPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!facilitator) navigate({ to: "/" });
-  }, [facilitator, navigate]);
+    if (hydrated && !facilitator) navigate({ to: "/" });
+  }, [facilitator, hydrated, navigate]);
 
   const load = async () => {
     const { data } = await supabase

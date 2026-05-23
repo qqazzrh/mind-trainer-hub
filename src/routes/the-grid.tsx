@@ -86,11 +86,11 @@ function getQuads(count: number, mi: number): number[] {
 
 // ─────────── Component ───────────
 function TheGrid() {
-  const { facilitator } = useFacilitator();
+  const { facilitator, hydrated } = useFacilitator();
   const navigate = useNavigate();
   useEffect(() => {
-    if (!facilitator) navigate({ to: "/" });
-  }, [facilitator, navigate]);
+    if (hydrated && !facilitator) navigate({ to: "/" });
+  }, [facilitator, hydrated, navigate]);
 
   // setup form
   const [team1Name, setTeam1Name] = useState("Team Alpha");
