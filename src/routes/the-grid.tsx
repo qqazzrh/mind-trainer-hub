@@ -618,7 +618,7 @@ function TheGrid() {
                     </div>
                   ))}
                   <datalist id="tg-participants-list">
-                    {existingParticipants.map((p) => (
+                    {Array.from(new Map(existingParticipants.map((p) => [p.name.toLowerCase(), p])).values()).map((p) => (
                       <option key={p.participant_id} value={p.name} />
                     ))}
                   </datalist>
