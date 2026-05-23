@@ -205,6 +205,21 @@ function TheGrid() {
     setIsPractice(true);
     setRound(0);
 
+    // Ensure each member exists in participants table (idempotent upsert by participant_id)
+    try {
+      const participantRows = [t1, t2].flatMap((t) =>
+        t.members.map((m) => ({
+          participant_id: `${t.name}::${m.name}`,
+          name: m.name,
+        }))
+      );
+      if (participantRows.length) {
+        await supabase
+          .from("participants")
+          .upsert(participantRows, { onConflict: "participant_id", ignoreDuplicates: false });
+      }
+    } catch {}
+
     // Persist session
     try {
       const { data, error } = await supabase
