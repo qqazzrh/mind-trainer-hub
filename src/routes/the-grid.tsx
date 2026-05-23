@@ -605,9 +605,21 @@ function TheGrid() {
                   {Array.from({ length: count }).map((_, i) => (
                     <div key={i} style={{ position: "relative" }}>
                       <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#666" }}>{i + 1}</span>
-                      <input className="tg-input" style={{ paddingLeft: 32 }} value={members[i] ?? ""} onChange={(e) => updateMember(t, i, e.target.value)} placeholder={`Member ${i + 1}`} />
+                      <input
+                        className="tg-input"
+                        style={{ paddingLeft: 32 }}
+                        value={members[i] ?? ""}
+                        onChange={(e) => updateMember(t, i, e.target.value)}
+                        placeholder={`Member ${i + 1} — pick existing or type new`}
+                        list="tg-participants-list"
+                      />
                     </div>
                   ))}
+                  <datalist id="tg-participants-list">
+                    {existingParticipants.map((p) => (
+                      <option key={p.participant_id} value={p.name} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
             );
