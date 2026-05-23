@@ -1103,10 +1103,18 @@ function ResultsScreen({ isPractice, round, teams, roundScores, sessionScores, d
         <div style={{ fontSize: 12, color: "#666", textAlign: "center", lineHeight: 1.5, padding: "0 8px" }}>
           {isPractice ? "Practice scores don't count. Round 1 starts now!" : `Totals — ${teams[0].name}: ${sessionScores[0]}pts  |  ${teams[1].name}: ${sessionScores[1]}pts`}
         </div>
-        <button className="tg-btn-primary" onClick={onNext}>
-          {isPractice ? "START ROUND 1 →" : remaining > 0 ? `NEXT ROUND (${remaining} left) →` : "FINAL ROUND DONE →"}
-        </button>
-        <button className="tg-btn-secondary" onClick={onEnd}>END SESSION</button>
+        {isPractice || remaining > 0 ? (
+          <>
+            <button className="tg-btn-primary" onClick={onNext}>
+              {isPractice ? "START ROUND 1 →" : `NEXT ROUND (${remaining} left) →`}
+            </button>
+            <button className="tg-btn-secondary" onClick={onEnd}>END SESSION</button>
+          </>
+        ) : (
+          <button className="tg-btn-primary" onClick={onEnd}>
+            FINISH & SAVE SCORES →
+          </button>
+        )}
       </div>
     </div>
   );
