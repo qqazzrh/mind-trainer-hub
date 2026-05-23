@@ -3,6 +3,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useFacilitator } from "@/lib/facilitator-context";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/the-grid")({
   component: TheGrid,
@@ -616,22 +623,30 @@ function TheGrid() {
                         const selectVal = current === "" ? "" : isNew ? "__new__" : current;
                         return (
                           <>
-                            <select
-                              className="tg-input"
-                              style={{ paddingLeft: 32, appearance: "auto", cursor: "pointer" }}
-                              value={selectVal}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "__new__") updateMember(t, i, "New participant");
+                            <Select
+                              value={selectVal || undefined}
+                              onValueChange={(v) => {
+                                if (v === "__new__") updateMember(t, i, " ");
                                 else updateMember(t, i, v);
                               }}
                             >
-                              <option value="">— Select participant —</option>
-                              {dedup.map((p) => (
-                                <option key={p.participant_id} value={p.name}>{p.name}</option>
-                              ))}
-                              <option value="__new__">+ Add new participant…</option>
-                            </select>
+                              <SelectTrigger
+                                className="tg-input"
+                                style={{ paddingLeft: 32, height: "auto", cursor: "pointer", background: "#0f0f0f", borderColor: "#333", color: "#f5f5f0" }}
+                              >
+                                <SelectValue placeholder="— Select participant —" />
+                              </SelectTrigger>
+                              <SelectContent style={{ background: "#1a1a1a", color: "#f5f5f0", borderColor: "#333", maxHeight: 320 }}>
+                                {dedup.map((p) => (
+                                  <SelectItem key={p.participant_id} value={p.name}>
+                                    {p.name}
+                                  </SelectItem>
+                                ))}
+                                <SelectItem value="__new__" style={{ color: "#e8ff47" }}>
+                                  + Add new participant…
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
                             {isNew && (
                               <input
                                 className="tg-input"
