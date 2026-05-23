@@ -104,8 +104,8 @@ function TheGrid() {
   const [team2Name, setTeam2Name] = useState("Team Beta");
   const [count1, setCount1] = useState(2);
   const [count2, setCount2] = useState(2);
-  const [members1, setMembers1] = useState<string[]>(["Member 1", "Member 2", "Member 3", "Member 4"]);
-  const [members2, setMembers2] = useState<string[]>(["Member 1", "Member 2", "Member 3", "Member 4"]);
+  const [members1, setMembers1] = useState<string[]>(["", "", "", ""]);
+  const [members2, setMembers2] = useState<string[]>(["", "", "", ""]);
   const [gridSizeCfg, setGridSizeCfg] = useState(6);
   const [viewTimeCfg, setViewTimeCfg] = useState(8);
   const [drawTimeCfg, setDrawTimeCfg] = useState(120);
@@ -614,13 +614,18 @@ function TheGrid() {
                   {Array.from({ length: count }).map((_, i) => (
                     <div key={i} style={{ position: "relative" }}>
                       <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#666" }}>{i + 1}</span>
-                      {(() => {
-                        const dedup = Array.from(
-                          new Map(existingParticipants.map((p) => [p.name.toLowerCase(), p])).values()
-                        );
-                        const current = members[i] ?? "";
-                        const isNew = current && !dedup.some((p) => p.name.toLowerCase() === current.toLowerCase());
-                        const selectVal = current === "" ? "" : isNew ? "__new__" : current;
+                       {(() => {
+                         const dedup = Array.from(
+                           new Map(existingParticipants.map((p) => [p.name.toLowerCase(), p])).values()
+                         );
+                         const current = members[i] ?? "";
+                         const isNew = !!current && !dedup.some((p) => p.name.toLowerCase() === current.toLowerCase());
+                         // Exclude names already chosen in either team (except the current cell)
+                         const taken = new Set<string>();
+                         members1.forEach((n, idx) => { if (!(t === 1 && idx === i) && n && n.trim()) taken.add(n.trim().toLowerCase()); });
+                         members2.forEach((n, idx) => { if (!(t === 2 && idx === i) && n && n.trim()) taken.add(n.trim().toLowerCase()); });
+                         const available = dedup.filter((p) => !taken.has(p.name.toLowerCase()));
+                         const selectVal = current === "" ? "" : isNew ? "__new__" : current;
                         return (
                           <>
                             <Select
@@ -637,7 +642,7 @@ function TheGrid() {
                                 <SelectValue placeholder="— Select participant —" />
                               </SelectTrigger>
                               <SelectContent style={{ background: "#1a1a1a", color: "#f5f5f0", borderColor: "#333", maxHeight: 320 }}>
-                                {dedup.map((p) => (
+                                {available.map((p) => (
                                   <SelectItem key={p.participant_id} value={p.name}>
                                     {p.name}
                                   </SelectItem>
@@ -651,7 +656,7 @@ function TheGrid() {
                               <input
                                 className="tg-input"
                                 style={{ paddingLeft: 32, marginTop: 6 }}
-                                value={current}
+                                value={current.trim()}
                                 onChange={(e) => updateMember(t, i, e.target.value)}
                                 placeholder="New participant name"
                                 autoFocus
