@@ -10,8 +10,9 @@ export const Route = createFileRoute("/the-grid")({
 });
 
 // ─────────── Types ───────────
-type Member = { name: string };
+type Member = { name: string; participantId?: string };
 type Team = { name: string; members: Member[]; count: number };
+type ExistingParticipant = { id: string; participant_id: string; name: string };
 type QueueItem = { teamIdx: number; memberIdx: number; quadrants: number[] };
 type QueueEntry = { memberIdx: number; pair: QueueItem[] };
 type MemberScore = {
@@ -134,6 +135,18 @@ function TheGrid() {
   const [tips, setTips] = useState<{ team: string; text: string }[]>([]);
   const [endModal, setEndModal] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [existingParticipants, setExistingParticipants] = useState<ExistingParticipant[]>([]);
+
+  // Load existing participants from DB
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("participants")
+        .select("id, participant_id, name")
+        .order("name", { ascending: true });
+      if (data) setExistingParticipants(data as ExistingParticipant[]);
+    })();
+  }, []);
 
   // Calc rounds
   const roundMinutes = useMemo(() => {
@@ -188,15 +201,33 @@ function TheGrid() {
   };
 
   const startGame = async () => {
+    const slug = (s: string) =>
+      s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "member";
+    const rand = () => Math.random().toString(36).slice(2, 7);
+
+    // Resolve a member name → ExistingParticipant (creating one if needed)
+    const byName = new Map(existingParticipants.map((p) => [p.name.trim().toLowerCase(), p]));
+    const toCreate: { participant_id: string; name: string }[] = [];
+    const resolveMember = (rawName: string, fallbackIdx: number): Member => {
+      const name = (rawName || `Member ${fallbackIdx + 1}`).trim();
+      const existing = byName.get(name.toLowerCase());
+      if (existing) return { name: existing.name, participantId: existing.participant_id };
+      const participant_id = `p_${slug(name)}_${rand()}`;
+      toCreate.push({ participant_id, name });
+      // Cache so duplicate names within the same form reuse the same id
+      byName.set(name.toLowerCase(), { id: "", participant_id, name });
+      return { name, participantId: participant_id };
+    };
+
     const t1: Team = {
       name: team1Name || "Team 1",
       count: count1,
-      members: Array.from({ length: count1 }, (_, i) => ({ name: members1[i] || `Member ${i + 1}` })),
+      members: Array.from({ length: count1 }, (_, i) => resolveMember(members1[i], i)),
     };
     const t2: Team = {
       name: team2Name || "Team 2",
       count: count2,
-      members: Array.from({ length: count2 }, (_, i) => ({ name: members2[i] || `Member ${i + 1}` })),
+      members: Array.from({ length: count2 }, (_, i) => resolveMember(members2[i], i)),
     };
     setTeams([t1, t2]);
     setMaxRounds(estRounds);
@@ -205,18 +236,19 @@ function TheGrid() {
     setIsPractice(true);
     setRound(0);
 
-    // Ensure each member exists in participants table (idempotent upsert by participant_id)
+    // Insert any newly-created participants
     try {
-      const participantRows = [t1, t2].flatMap((t) =>
-        t.members.map((m) => ({
-          participant_id: `${t.name}::${m.name}`,
-          name: m.name,
-        }))
-      );
-      if (participantRows.length) {
-        await supabase
+      if (toCreate.length) {
+        const { data } = await supabase
           .from("participants")
-          .upsert(participantRows, { onConflict: "participant_id", ignoreDuplicates: false });
+          .upsert(toCreate, { onConflict: "participant_id", ignoreDuplicates: false })
+          .select("id, participant_id, name");
+        if (data) {
+          setExistingParticipants((prev) => {
+            const seen = new Set(prev.map((p) => p.participant_id));
+            return [...prev, ...(data as ExistingParticipant[]).filter((p) => !seen.has(p.participant_id))];
+          });
+        }
       }
     } catch {}
 
@@ -435,8 +467,9 @@ function TheGrid() {
         }[] = [];
         results.forEach((rs, ti) => {
           rs.memberScores.forEach((ms) => {
+            const m = teams[ti].members.find((mm) => mm.name === ms.name);
             rows.push({
-              participant_id: `${teams[ti].name}::${ms.name}`,
+              participant_id: m?.participantId ?? `${teams[ti].name}::${ms.name}`,
               session_id: sessionId,
               round_number: round,
               score: ms.pct,
@@ -572,9 +605,21 @@ function TheGrid() {
                   {Array.from({ length: count }).map((_, i) => (
                     <div key={i} style={{ position: "relative" }}>
                       <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#666" }}>{i + 1}</span>
-                      <input className="tg-input" style={{ paddingLeft: 32 }} value={members[i] ?? ""} onChange={(e) => updateMember(t, i, e.target.value)} placeholder={`Member ${i + 1}`} />
+                      <input
+                        className="tg-input"
+                        style={{ paddingLeft: 32 }}
+                        value={members[i] ?? ""}
+                        onChange={(e) => updateMember(t, i, e.target.value)}
+                        placeholder={`Member ${i + 1} — pick existing or type new`}
+                        list="tg-participants-list"
+                      />
                     </div>
                   ))}
+                  <datalist id="tg-participants-list">
+                    {existingParticipants.map((p) => (
+                      <option key={p.participant_id} value={p.name} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
             );
