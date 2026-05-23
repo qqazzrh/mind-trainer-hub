@@ -607,21 +607,46 @@ function TheGrid() {
                   {Array.from({ length: count }).map((_, i) => (
                     <div key={i} style={{ position: "relative" }}>
                       <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", fontFamily: "'Space Mono',monospace", fontSize: 10, color: "#666" }}>{i + 1}</span>
-                      <input
-                        className="tg-input"
-                        style={{ paddingLeft: 32 }}
-                        value={members[i] ?? ""}
-                        onChange={(e) => updateMember(t, i, e.target.value)}
-                        placeholder={`Member ${i + 1} — pick existing or type new`}
-                        list="tg-participants-list"
-                      />
+                      {(() => {
+                        const dedup = Array.from(
+                          new Map(existingParticipants.map((p) => [p.name.toLowerCase(), p])).values()
+                        );
+                        const current = members[i] ?? "";
+                        const isNew = current && !dedup.some((p) => p.name.toLowerCase() === current.toLowerCase());
+                        const selectVal = current === "" ? "" : isNew ? "__new__" : current;
+                        return (
+                          <>
+                            <select
+                              className="tg-input"
+                              style={{ paddingLeft: 32, appearance: "auto", cursor: "pointer" }}
+                              value={selectVal}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === "__new__") updateMember(t, i, "New participant");
+                                else updateMember(t, i, v);
+                              }}
+                            >
+                              <option value="">— Select participant —</option>
+                              {dedup.map((p) => (
+                                <option key={p.participant_id} value={p.name}>{p.name}</option>
+                              ))}
+                              <option value="__new__">+ Add new participant…</option>
+                            </select>
+                            {isNew && (
+                              <input
+                                className="tg-input"
+                                style={{ paddingLeft: 32, marginTop: 6 }}
+                                value={current}
+                                onChange={(e) => updateMember(t, i, e.target.value)}
+                                placeholder="New participant name"
+                                autoFocus
+                              />
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   ))}
-                  <datalist id="tg-participants-list">
-                    {Array.from(new Map(existingParticipants.map((p) => [p.name.toLowerCase(), p])).values()).map((p) => (
-                      <option key={p.participant_id} value={p.name} />
-                    ))}
-                  </datalist>
                 </div>
               </div>
             );
