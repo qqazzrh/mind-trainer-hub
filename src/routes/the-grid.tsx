@@ -467,8 +467,9 @@ function TheGrid() {
         }[] = [];
         results.forEach((rs, ti) => {
           rs.memberScores.forEach((ms) => {
+            const m = teams[ti].members.find((mm) => mm.name === ms.name);
             rows.push({
-              participant_id: `${teams[ti].name}::${ms.name}`,
+              participant_id: m?.participantId ?? `${teams[ti].name}::${ms.name}`,
               session_id: sessionId,
               round_number: round,
               score: ms.pct,
