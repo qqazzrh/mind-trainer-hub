@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Brain, Grid3x3, Headphones, LogOut, Users, History, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useFacilitator, type Facilitator } from "@/lib/facilitator-context";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/")({
   component: Home,
@@ -18,19 +20,38 @@ export const Route = createFileRoute("/")({
 
 function Home() {
   const { facilitator, setFacilitator } = useFacilitator();
-  const [facilitators, setFacilitators] = useState<Facilitator[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [facilitatorId, setFacilitatorId] = useState("");
+  const [name, setName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    supabase
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    const id = facilitatorId.trim();
+    const nm = name.trim();
+    if (!id || !nm) {
+      setError("Please enter both your ID and name.");
+      return;
+    }
+    setSubmitting(true);
+    const { data, error: qErr } = await supabase
       .from("facilitators")
       .select("id, facilitator_id, name")
-      .order("facilitator_id")
-      .then(({ data }) => {
-        setFacilitators(data ?? []);
-        setLoading(false);
-      });
-  }, []);
+      .ilike("facilitator_id", id)
+      .ilike("name", nm)
+      .maybeSingle();
+    setSubmitting(false);
+    if (qErr) {
+      setError("Something went wrong. Please try again.");
+      return;
+    }
+    if (!data) {
+      setError("No matching record. Please retry or contact owner: team@nuracare.co");
+      return;
+    }
+    setFacilitator(data as Facilitator);
+  };
 
   if (!facilitator) {
     return (
@@ -41,25 +62,37 @@ function Home() {
               <Brain className="h-9 w-9" />
             </div>
             <h1 className="text-4xl font-semibold tracking-tight">Brain Gym</h1>
-            <p className="mt-3 text-muted-foreground">Pick your name to get started.</p>
+            <p className="mt-3 text-muted-foreground">Enter your facilitator ID and name to get started.</p>
           </div>
 
-          {loading ? (
-            <p className="text-center text-muted-foreground">Loading…</p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {facilitators.map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => setFacilitator(f)}
-                  className="group rounded-xl border bg-card p-5 text-left transition hover:border-primary hover:shadow-md"
-                >
-                  <div className="text-xs uppercase tracking-wider text-muted-foreground">{f.facilitator_id}</div>
-                  <div className="mt-1 text-xl font-medium">{f.name}</div>
-                </button>
-              ))}
+          <form onSubmit={handleSubmit} className="mx-auto max-w-md space-y-4 rounded-xl border bg-card p-6 shadow-sm">
+            <div className="space-y-2">
+              <Label htmlFor="fid">Facilitator ID</Label>
+              <Input
+                id="fid"
+                value={facilitatorId}
+                onChange={(e) => setFacilitatorId(e.target.value)}
+                placeholder="e.g. F001"
+                autoComplete="off"
+              />
             </div>
-          )}
+            <div className="space-y-2">
+              <Label htmlFor="fname">Name</Label>
+              <Input
+                id="fname"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your full name"
+                autoComplete="off"
+              />
+            </div>
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+            <Button type="submit" className="w-full" disabled={submitting}>
+              {submitting ? "Checking…" : "Continue"}
+            </Button>
+          </form>
         </div>
       </div>
     );
