@@ -72,7 +72,7 @@ function Home() {
                 id="fid"
                 value={facilitatorId}
                 onChange={(e) => setFacilitatorId(e.target.value)}
-                placeholder="e.g. F001"
+                placeholder="FAC-001"
                 autoComplete="off"
               />
             </div>
@@ -82,7 +82,7 @@ function Home() {
                 id="fname"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Your full name"
+                placeholder="your first name"
                 autoComplete="off"
               />
             </div>
