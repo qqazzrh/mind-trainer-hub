@@ -84,11 +84,34 @@ function generateGrid(n: number): number[][] {
   }
   return g;
 }
-function getQuads(count: number, mi: number): number[] {
-  if (count === 1) return [0, 1, 2, 3];
-  if (count === 2) return mi === 0 ? [0, 1] : [2, 3];
-  if (count === 3) return mi === 0 ? [0] : mi === 1 ? [1, 2] : [3];
-  return [mi];
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+// Returns an assignment array of length `count`. The flattened union is
+// always exactly [0,1,2,3] — every quadrant covered once, none duplicated.
+function getQuadAssignments(count: number): number[][] {
+  if (count <= 1) return [[0, 1, 2, 3]];
+  const perm = shuffle([0, 1, 2, 3]);
+  let groups: number[][];
+  if (count === 2) {
+    groups = [[perm[0], perm[1]], [perm[2], perm[3]]];
+  } else if (count === 3) {
+    // one member gets a pair, the other two get singles
+    const pairPos = Math.floor(Math.random() * 3);
+    const singles = [perm[0], perm[3]];
+    const pair = [perm[1], perm[2]];
+    groups = [];
+    let s = 0;
+    for (let i = 0; i < 3; i++) groups.push(i === pairPos ? pair : [singles[s++]]);
+  } else {
+    groups = perm.map((q) => [q]);
+  }
+  return shuffle(groups);
 }
 
 // ─────────── Component ───────────
