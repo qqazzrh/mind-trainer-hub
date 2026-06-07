@@ -340,11 +340,15 @@ function TheGrid() {
     // Build queue
     const max = Math.max(teamList[0].count, teamList[1].count);
     const q: QueueEntry[] = [];
+    const assignmentsByTeam = [
+      getQuadAssignments(teamList[0].count),
+      getQuadAssignments(teamList[1].count),
+    ];
     for (let mi = 0; mi < max; mi++) {
       const pair: QueueItem[] = [];
       for (let ti = 0; ti < 2; ti++) {
         if (mi < teamList[ti].count) {
-          pair.push({ teamIdx: ti, memberIdx: mi, quadrants: getQuads(teamList[ti].count, mi) });
+          pair.push({ teamIdx: ti, memberIdx: mi, quadrants: assignmentsByTeam[ti][mi] });
         }
       }
       if (pair.length) q.push({ memberIdx: mi, pair });
